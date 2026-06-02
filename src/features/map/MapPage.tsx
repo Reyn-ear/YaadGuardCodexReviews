@@ -34,6 +34,7 @@ import { computeWaterDepths } from './rain-sim'
 import { fetchSubGridElevations } from './elevation'
 import { RainControls } from './RainControls'
 import './rain-controls.css'
+import { InfoCard } from './InfoCard'
 import type {
   BoundsTuple,
   GridCellFeature,
@@ -44,7 +45,7 @@ import type {
 } from './types'
 import { TerrainPopup } from './TerrainPopup'
 
-type PanelState =
+export type PanelState =
   | { status: 'empty' }
   | { status: 'loading'; label: string }
   | {
@@ -232,7 +233,6 @@ export default function MapPage() {
     analysisRequestIdRef.current = requestId
 
     setPanelState({ status: 'loading', label: payload.label })
-    setIsSidebarOpen(true)
 
     try {
       const insight = await getRegionInsights({ data: payload })
@@ -258,7 +258,6 @@ export default function MapPage() {
         message:
           'Hazard signals could not be calculated for this location. Check the server data sources and try again.',
       })
-      setIsSidebarOpen(true)
     }
   })
 
@@ -337,7 +336,6 @@ export default function MapPage() {
           message: 'Try a broader city, parish, or landmark name.',
         })
         setSearchMessage('No results matched that search.')
-        setIsSidebarOpen(true)
         return
       }
 
@@ -350,7 +348,6 @@ export default function MapPage() {
           'The location service could not be reached. Try again in a moment.',
       })
       setSearchMessage('Search request failed. Please retry.')
-      setIsSidebarOpen(true)
     } finally {
       setIsSearching(false)
     }
@@ -418,6 +415,12 @@ export default function MapPage() {
           onCellSelect={handleCellSelect}
           waterDepths={waterDepths.length > 0 ? waterDepths : null}
           selectedCellBounds={selectedCellBoundsRef.current}
+        />
+
+        <InfoCard
+          panelState={panelState}
+          mmPerHr={mmPerHr}
+          onDetailsClick={() => setIsSidebarOpen(true)}
         />
 
         <div className="map-page__search">
@@ -557,18 +560,8 @@ export default function MapPage() {
           ) : null}
         </div>
 
-        {!isSidebarOpen && panelState.status !== 'empty' && (
-          <button
-            type="button"
-            onClick={() => setIsSidebarOpen(true)}
-            className="fixed right-5 bottom-5 z-20 flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(15,23,42,0.8)] text-[var(--accent)] shadow-lg backdrop-blur-md transition-transform hover:scale-110 sm:right-8 sm:bottom-8"
-            aria-label="Open analysis sidebar"
-          >
-            <MapPinned size={24} />
-          </button>
-        )}
-
         <aside
+          id="map-page-sidebar"
           className={`map-page__sidebar ${!isSidebarOpen ? 'map-page__sidebar--hidden' : ''}`}
         >
           <div className="map-page__sidebar-header">
@@ -1366,16 +1359,10 @@ function MapCanvas({
     const latStep = (north - south) / SUB_GRID_SIZE
     const lngStep = (east - west) / SUB_GRID_SIZE
 
-    console.log('[WaterOverlay] Bounds:', { west, south, east, north })
-    console.log('[WaterOverlay] Steps:', { latStep, lngStep })
-    console.log('[WaterOverlay] waterDepths length:', waterDepths.length)
-    console.log('[WaterOverlay] waterDepths sample:', waterDepths.slice(0, 25))
-
     // Create GeoJSON polygons for each sub-grid cell
     // Row 0 is at TOP (north), row (SUB_GRID_SIZE-1) is at BOTTOM (south)
     // Col 0 is at LEFT (west), col (SUB_GRID_SIZE-1) is at RIGHT (east)
     const features: GeoJSON.Feature<GeoJSON.Polygon>[] = []
-    const featuresByRow: number[] = new Array(SUB_GRID_SIZE).fill(0)
 
     for (let row = 0; row < SUB_GRID_SIZE; row++) {
       for (let col = 0; col < SUB_GRID_SIZE; col++) {
@@ -1391,7 +1378,6 @@ function MapCanvas({
         const cellWest = west + col * lngStep
         const cellEast = cellWest + lngStep
 
-        featuresByRow[row]++
         features.push({
           type: 'Feature',
           properties: { depth },
@@ -1410,9 +1396,6 @@ function MapCanvas({
         })
       }
     }
-
-    console.log('[WaterOverlay] Features by row:', featuresByRow)
-    console.log('[WaterOverlay] Total features:', features.length)
 
     if (features.length === 0) return
 
