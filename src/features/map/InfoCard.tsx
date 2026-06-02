@@ -1,4 +1,4 @@
-import { ChevronRight, Gauge } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import type { PanelState } from './MapPage'
 
 interface InfoCardProps {
@@ -60,9 +60,6 @@ function getRiskLabel(panelState: PanelState) {
 }
 
 export function InfoCard({ panelState, mmPerHr, onDetailsClick }: InfoCardProps) {
-  const detailsDisabled = panelState.status === 'empty'
-  const fillRatio = Math.max(0, Math.min(mmPerHr / THRESHOLD_MM_PER_HR, 1))
-
   return (
     <article className="map-page__info-card" aria-live="polite">
       <div className="map-page__info-card-header">
@@ -73,33 +70,9 @@ export function InfoCard({ panelState, mmPerHr, onDetailsClick }: InfoCardProps)
         <span className="map-page__info-card-pill">{getRiskLabel(panelState)}</span>
       </div>
 
-      <div className="map-page__info-gauge">
-        <div className="map-page__info-gauge-row">
-          <span>Rainfall</span>
-          <strong>{mmPerHr.toFixed(0)} mm/hour</strong>
-        </div>
-
-        <div className="map-page__info-gauge-track" aria-hidden="true">
-          <div
-            className="map-page__info-gauge-fill"
-            style={{ width: `${fillRatio * 100}%` }}
-          />
-          <span
-            className="map-page__info-gauge-threshold"
-            style={{ left: '100%' }}
-          />
-          <span
-            className="map-page__info-gauge-marker"
-            style={{ left: '50%' }}
-          />
-        </div>
-
-        <div className="map-page__info-gauge-labels" aria-hidden="true">
-          <span>0</span>
-          <span>25</span>
-          <span>50</span>
-        </div>
-      </div>
+      <p className="map-page__info-rainfall">
+        Current rainfall: <strong>{mmPerHr.toFixed(0)} mm/hour</strong>
+      </p>
 
       <p className="map-page__info-copy">{getAdvisory(panelState, mmPerHr)}</p>
 
@@ -107,7 +80,6 @@ export function InfoCard({ panelState, mmPerHr, onDetailsClick }: InfoCardProps)
         type="button"
         className="map-page__info-details"
         onClick={onDetailsClick}
-        disabled={detailsDisabled}
         aria-controls="map-page-sidebar"
         aria-label="Open detailed flood analysis"
       >
@@ -116,7 +88,6 @@ export function InfoCard({ panelState, mmPerHr, onDetailsClick }: InfoCardProps)
       </button>
 
       <div className="map-page__info-meta">
-        <Gauge size={15} aria-hidden="true" />
         <span>Threshold watch: 50 mm/hour</span>
       </div>
     </article>
