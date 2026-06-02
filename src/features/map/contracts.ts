@@ -43,6 +43,12 @@ export const regionInsightResponseSchema = z.object({
     mostRecentNearbyStormYear: z.number().optional(),
     estimatedPopulation: z.number().optional(),
     populationDensityPerSqKm: z.number().optional(),
+    builtUpPct: z.number().optional(),
+    treeCoverPct: z.number().optional(),
+    croplandPct: z.number().optional(),
+    waterPct: z.number().optional(),
+    wetlandPct: z.number().optional(),
+    mangrovePct: z.number().optional(),
   }),
   historicalAnalog: z
     .object({
@@ -54,6 +60,7 @@ export const regionInsightResponseSchema = z.object({
     .optional(),
   dataQuality: z.object({
     terrainAvailable: z.boolean(),
+    landCoverAvailable: z.boolean(),
     surgeAvailable: z.boolean(),
     stormHistoryAvailable: z.boolean(),
     confidenceNotes: z.array(z.string()),

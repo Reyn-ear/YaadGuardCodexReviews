@@ -51,6 +51,10 @@ export interface RiskProfileInput {
   storms?: StormAggregate
   populationDensityPerSqKm?: number
   estimatedPopulation?: number
+  builtUpPct?: number
+  waterPct?: number
+  wetlandPct?: number
+  mangrovePct?: number
   analysisAreaSqKm?: number
   confidenceNotes: string[]
 }
@@ -130,6 +134,12 @@ export function buildMetrics(input: {
   storms?: StormAggregate
   populationDensityPerSqKm?: number
   estimatedPopulation?: number
+  builtUpPct?: number
+  treeCoverPct?: number
+  croplandPct?: number
+  waterPct?: number
+  wetlandPct?: number
+  mangrovePct?: number
   analysisAreaSqKm?: number
 }): RegionInsightMetrics {
   const terrain = input.terrain
@@ -149,7 +159,9 @@ export function buildMetrics(input: {
     elevationMaxM: terrain ? round(terrain.stats.max) : undefined,
     reliefM: terrain ? round(terrain.stats.max - terrain.stats.min) : undefined,
     feasibleSlopeAngleDeg,
-    landCoveragePct: terrain ? round(terrain.coverage.landCoveragePct) : undefined,
+    landCoveragePct: terrain
+      ? round(terrain.coverage.landCoveragePct)
+      : undefined,
     nearestSurgeStationKm: surge ? round(surge.distanceKm) : undefined,
     surgeRp1M: surge ? round(surge.rp1Bestfit, 2) : undefined,
     surgeRp10M: surge ? round(surge.rp10Bestfit, 2) : undefined,
@@ -166,6 +178,20 @@ export function buildMetrics(input: {
       input.estimatedPopulation !== undefined
         ? Math.round(input.estimatedPopulation)
         : undefined,
+    builtUpPct:
+      input.builtUpPct !== undefined ? round(input.builtUpPct, 1) : undefined,
+    treeCoverPct:
+      input.treeCoverPct !== undefined
+        ? round(input.treeCoverPct, 1)
+        : undefined,
+    croplandPct:
+      input.croplandPct !== undefined ? round(input.croplandPct, 1) : undefined,
+    waterPct:
+      input.waterPct !== undefined ? round(input.waterPct, 1) : undefined,
+    wetlandPct:
+      input.wetlandPct !== undefined ? round(input.wetlandPct, 1) : undefined,
+    mangrovePct:
+      input.mangrovePct !== undefined ? round(input.mangrovePct, 1) : undefined,
   }
 }
 
@@ -175,6 +201,10 @@ export function buildRiskProfile({
   storms,
   populationDensityPerSqKm,
   estimatedPopulation,
+  builtUpPct,
+  waterPct,
+  wetlandPct,
+  mangrovePct,
   analysisAreaSqKm,
   confidenceNotes,
 }: RiskProfileInput): RiskProfile {
@@ -190,6 +220,12 @@ export function buildRiskProfile({
     populationDensityPerSqKm,
     estimatedPopulation,
   })
+  const landCoverDriver = buildLandCoverContribution({
+    builtUpPct,
+    waterPct,
+    wetlandPct,
+    mangrovePct,
+  })
 
   const drivers = [
     terrainDriver,
@@ -197,6 +233,7 @@ export function buildRiskProfile({
     surgeDriver,
     stormDriver,
     exposureDriver,
+    landCoverDriver,
   ].filter((driver): driver is DriverContribution => driver.weight > 0)
 
   const score = clamp(
@@ -206,10 +243,20 @@ export function buildRiskProfile({
   )
 
   const band: RiskBand =
-    score >= 75 ? 'Severe' : score >= 55 ? 'High' : score >= 30 ? 'Moderate' : 'Low'
+    score >= 75
+      ? 'Severe'
+      : score >= 55
+        ? 'High'
+        : score >= 30
+          ? 'Moderate'
+          : 'Low'
 
   const confidence: ConfidenceBand =
-    confidenceNotes.length >= 3 ? 'Low' : confidenceNotes.length >= 1 ? 'Medium' : 'High'
+    confidenceNotes.length >= 3
+      ? 'Low'
+      : confidenceNotes.length >= 1
+        ? 'Medium'
+        : 'High'
 
   return {
     band,
@@ -222,13 +269,14 @@ export function buildRiskProfile({
   }
 }
 
-export function buildFallbackInsight(input: {
+export function buildDeterministicInsight(input: {
   label: string
   riskProfile: RiskProfile
   metrics: RegionInsightMetrics
 }): AIInsight {
   const { label, riskProfile, metrics } = input
-  const driver = riskProfile.topDrivers[0] ?? 'Available hazard signals are mixed.'
+  const driver =
+    riskProfile.topDrivers[0] ?? 'Available hazard signals are mixed.'
 
   const terrainFocus =
     metrics.elevationMeanM !== undefined && metrics.reliefM !== undefined
@@ -255,6 +303,11 @@ export function buildFallbackInsight(input: {
       ? `Around ${metrics.estimatedPopulation.toLocaleString()} people are estimated inside the analysis window, so exposure rises if flooding does occur.`
       : ''
 
+  const landCoverFocus =
+    metrics.builtUpPct !== undefined || metrics.waterPct !== undefined
+      ? `WorldCover shows ${metrics.builtUpPct ?? 0}% built-up cover and ${metrics.waterPct ?? 0}% open water in the analysis window.`
+      : ''
+
   const landslideFocus =
     metrics.feasibleSlopeAngleDeg !== undefined
       ? metrics.feasibleSlopeAngleDeg >= 20
@@ -271,6 +324,7 @@ export function buildFallbackInsight(input: {
     ),
     explanation: truncateText(
       [driver, terrainFocus, landslideFocus, surgeFocus, exposureFocus]
+        .concat(landCoverFocus)
         .filter(Boolean)
         .join(' '),
       320,
@@ -278,7 +332,7 @@ export function buildFallbackInsight(input: {
     caution:
       riskProfile.confidence !== 'High'
         ? truncateText(
-            `Confidence is ${riskProfile.confidence.toLowerCase()} because some supporting terrain, surge, or population data is sparse or unavailable.`,
+            `Confidence is ${riskProfile.confidence.toLowerCase()} because some supporting terrain, land-cover, surge, or population data is sparse or unavailable.`,
             220,
           )
         : undefined,
@@ -350,7 +404,11 @@ function buildSurgeContribution(
   }
 
   const baseScore = clamp((nearestSurge.rp100Bestfit / 2.5) * 15, 0, 15)
-  const proximityScore = clamp(((180 - nearestSurge.distanceKm) / 180) * 4, 0, 4)
+  const proximityScore = clamp(
+    ((180 - nearestSurge.distanceKm) / 180) * 4,
+    0,
+    4,
+  )
   const overtoppingScore =
     terrain && nearestSurge.rp100Bestfit > terrain.stats.mean
       ? clamp(
@@ -370,7 +428,7 @@ function buildSurgeContribution(
         ? `Estimated 100-year surge of ${round(nearestSurge.rp100Bestfit, 2)} m can exceed the cell's average ground height of ${round(terrain.stats.mean)} m.`
         : isDistantStation || isLowSurgeSignal
           ? `Estimated 100-year surge of ${round(nearestSurge.rp100Bestfit, 2)} m suggests limited direct coastal pressure at this point, especially with the nearest station ${round(nearestSurge.distanceKm)} km away.`
-        : `Estimated 100-year surge of ${round(nearestSurge.rp100Bestfit, 2)} m still adds coastal flood pressure near this location.`,
+          : `Estimated 100-year surge of ${round(nearestSurge.rp100Bestfit, 2)} m still adds coastal flood pressure near this location.`,
     weight,
   }
 }
@@ -379,7 +437,10 @@ function buildStormContribution(
   storms: StormAggregate | undefined,
 ): DriverContribution {
   if (!storms?.distinctStormCount) {
-    return { label: 'Historical storm tracks are sparse near this area.', weight: 0 }
+    return {
+      label: 'Historical storm tracks are sparse near this area.',
+      weight: 0,
+    }
   }
 
   const countScore = clamp((storms.distinctStormCount / 8) * 8, 0, 8)
@@ -425,9 +486,7 @@ function buildExposureContribution(input: {
   }
 
   const densityScore =
-    density !== undefined
-      ? clamp((Math.log10(density + 1) / 3.5) * 6, 0, 6)
-      : 0
+    density !== undefined ? clamp((Math.log10(density + 1) / 3.5) * 6, 0, 6) : 0
   const populationScore =
     estimatedPopulation !== undefined
       ? clamp((Math.log10(estimatedPopulation + 1) / 5) * 4, 0, 4)
@@ -455,6 +514,42 @@ function buildExposureContribution(input: {
   }
 }
 
+function buildLandCoverContribution(input: {
+  builtUpPct?: number
+  waterPct?: number
+  wetlandPct?: number
+  mangrovePct?: number
+}): DriverContribution {
+  const aquaticPct =
+    (input.waterPct ?? 0) + (input.wetlandPct ?? 0) + (input.mangrovePct ?? 0)
+  const builtUpPct = input.builtUpPct ?? 0
+
+  if (
+    input.builtUpPct === undefined &&
+    input.waterPct === undefined &&
+    input.wetlandPct === undefined &&
+    input.mangrovePct === undefined
+  ) {
+    return { label: 'No land-cover signal is available.', weight: 0 }
+  }
+
+  const aquaticScore = clamp((aquaticPct / 35) * 6, 0, 6)
+  const builtScore = clamp((builtUpPct / 45) * 5, 0, 5)
+  const combinedScore = clamp((aquaticPct * builtUpPct) / 120, 0, 4)
+  const weight = clamp(aquaticScore + builtScore + combinedScore, 0, 15)
+
+  const label =
+    aquaticPct >= 20 && builtUpPct >= 15
+      ? `WorldCover shows ${round(aquaticPct, 1)}% water, wetland, or mangrove cover near ${round(builtUpPct, 1)}% built-up land, which raises exposure around flood-prone surfaces.`
+      : aquaticPct >= 20
+        ? `WorldCover shows ${round(aquaticPct, 1)}% water, wetland, or mangrove cover, indicating flood-sensitive land-cover nearby.`
+        : builtUpPct >= 15
+          ? `WorldCover shows ${round(builtUpPct, 1)}% built-up land, increasing exposure where flooding occurs.`
+          : `WorldCover land-cover mix does not add a strong flood-exposure signal here.`
+
+  return { label, weight }
+}
+
 function buildLandslideContribution(input: {
   terrain?: TerrainSummaryRecord
   storms?: StormAggregate
@@ -462,11 +557,17 @@ function buildLandslideContribution(input: {
 }): DriverContribution {
   const terrain = input.terrain
   if (!terrain || input.analysisAreaSqKm === undefined) {
-    return { label: 'Landslide signal is unavailable without terrain slope context.', weight: 0 }
+    return {
+      label: 'Landslide signal is unavailable without terrain slope context.',
+      weight: 0,
+    }
   }
 
   const relief = Math.max(terrain.stats.max - terrain.stats.min, 0)
-  const slopeAngleDeg = estimateFeasibleSlopeAngleDeg(relief, input.analysisAreaSqKm)
+  const slopeAngleDeg = estimateFeasibleSlopeAngleDeg(
+    relief,
+    input.analysisAreaSqKm,
+  )
   const slopeScore = clamp(((slopeAngleDeg - 6) / 22) * 10, 0, 10)
   const reliefScore = clamp(((relief - 35) / 160) * 3, 0, 3)
   const stormTriggerScore =
@@ -511,7 +612,10 @@ function describeTerrainContribution(input: {
 
 function estimateFeasibleSlopeAngleDeg(reliefM: number, areaSqKm: number) {
   const normalizedAreaSqKm = Math.max(areaSqKm, 0.05)
-  const characteristicRunM = Math.max(Math.sqrt(normalizedAreaSqKm) * 1000 * 0.4, 200)
+  const characteristicRunM = Math.max(
+    Math.sqrt(normalizedAreaSqKm) * 1000 * 0.4,
+    200,
+  )
   const angleRad = Math.atan2(Math.max(reliefM, 0), characteristicRunM)
   return round((angleRad * 180) / Math.PI, 1)
 }
