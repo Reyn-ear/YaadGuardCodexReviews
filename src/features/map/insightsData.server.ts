@@ -1,8 +1,4 @@
-import { readFile } from 'node:fs/promises'
-import path from 'node:path'
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { and, between, eq } from 'drizzle-orm'
-import { fromArrayBuffer, fromFile } from 'geotiff'
 import { z } from 'zod'
 import { CARIBBEAN_COUNTRY_BOUNDARIES } from './caribbeanCountryBoundaries'
 import { GRID_LAT_STEP, GRID_LNG_STEP } from './config'
@@ -19,10 +15,14 @@ import type {
   StormAggregate,
   TerrainSummaryRecord,
 } from './insightMath'
+import {
+  processDemTerrainSummary,
+  processWorldCoverLandCoverSummary,
+  processWorldPopPopulationSummary,
+} from './demProcessor.server'
+import { readGeneratedJson, writeGeneratedObject } from './runtimeData.server'
 import type { BoundsTuple, HistoricalAnalog, RegionInsightInput } from './types'
 
-const DEFAULT_OUTPUT_PREFIX = 'topographical_summaries'
-const DEFAULT_WORLDPOP_PREFIX = 'worldpop'
 const STORM_STATS_RADIUS_KM = 250
 const STORM_ANALOG_RADIUS_KM = 450
 const MAX_SEARCH_ANALYSIS_AREA_SQ_KM = 400
@@ -42,6 +42,26 @@ const terrainSummarySchema = z.object({
     landCoveragePct: z.number(),
   }),
   narrative: z.string().optional(),
+})
+
+const populationSummarySchema = z.object({
+  count: z.number(),
+  density: z.number().optional(),
+  iso3: z.string().optional(),
+  sourceYear: z.number().optional(),
+})
+
+const landCoverSummarySchema = z.object({
+  classes: z.object({
+    treeCoverPct: z.number().optional(),
+    croplandPct: z.number().optional(),
+    builtUpPct: z.number().optional(),
+    waterPct: z.number().optional(),
+    wetlandPct: z.number().optional(),
+    mangrovePct: z.number().optional(),
+  }),
+  validPixelCount: z.number().optional(),
+  source: z.string().optional(),
 })
 
 interface StormRow {
@@ -71,6 +91,15 @@ export interface PopulationLoadResult {
   sourceYear?: number
 }
 
+export interface LandCoverLoadResult {
+  treeCoverPct?: number
+  croplandPct?: number
+  builtUpPct?: number
+  waterPct?: number
+  wetlandPct?: number
+  mangrovePct?: number
+}
+
 export interface HistoricalAnalogCandidate extends HistoricalAnalog {
   stormId: string
 }
@@ -96,18 +125,6 @@ export interface NearestSurgeStationDetails extends NearestSurgeStation {
   rp75Upper95: number
 }
 
-type GeoTiffDataset = Awaited<ReturnType<typeof fromFile>>
-type GeoTiffImage = Awaited<ReturnType<GeoTiffDataset['getImage']>>
-
-interface RasterDataset {
-  dataset: GeoTiffDataset
-  image: GeoTiffImage
-  bbox: [number, number, number, number]
-  nodata: number | null
-}
-
-const rasterCache = new Map<string, Promise<RasterDataset | undefined>>()
-
 export async function loadPopulationData(
   center: [number, number],
   bounds: BoundsTuple,
@@ -118,21 +135,48 @@ export async function loadPopulationData(
   }
 
   const metadata = await loadWorldPopMetadata(country.iso3)
-  const raster = await loadWorldPopRaster(country.iso3, metadata)
-  if (!raster) {
+  const tileName = deriveTileName(center)
+  const payload =
+    (await loadGeneratedPopulationSummary(country.iso3, tileName, bounds)) ??
+    (metadata
+      ? await processAndStorePopulationSummary(
+          country.iso3,
+          tileName,
+          bounds,
+          metadata,
+        )
+      : undefined)
+
+  if (!payload) {
     return undefined
   }
 
-  const stats = await summarizePopulationBounds(raster, bounds)
-  if (!stats) {
-    return undefined
-  }
+  const areaSqKm = estimateBoundsAreaSqKm(bounds)
 
   return {
-    ...stats,
-    iso3: country.iso3,
-    sourceYear: metadata?.populationYear ?? undefined,
+    count: payload.count,
+    density: payload.density ?? (areaSqKm > 0 ? payload.count / areaSqKm : 0),
+    iso3: payload.iso3 ?? country.iso3,
+    sourceYear: payload.sourceYear ?? metadata?.populationYear ?? undefined,
   }
+}
+
+export async function loadLandCoverData(
+  center: [number, number],
+  bounds: BoundsTuple,
+): Promise<LandCoverLoadResult | undefined> {
+  const tileName = deriveTileName(center)
+  const generatedPayload = await loadGeneratedLandCoverSummary(tileName, bounds)
+  const payload =
+    generatedPayload && (generatedPayload.validPixelCount ?? 0) > 0
+      ? generatedPayload
+      : await processAndStoreLandCoverSummary(tileName, bounds)
+
+  if (!payload || (payload.validPixelCount ?? 0) <= 0) {
+    return undefined
+  }
+
+  return payload.classes
 }
 
 export async function loadNearestSurgeStation(
@@ -344,14 +388,6 @@ export async function loadTerrainSummary(
   center: [number, number],
   bounds: BoundsTuple,
 ): Promise<TerrainLoadResult | undefined> {
-  const cellScale = await loadRasterTerrainSummary(center, bounds)
-  if (cellScale) {
-    return {
-      record: cellScale,
-      precision: 'cell',
-    }
-  }
-
   const tileName = deriveTileName(center)
   const databasePayload = await loadDatabaseTerrainSummary(tileName)
 
@@ -365,29 +401,38 @@ export async function loadTerrainSummary(
     }
   }
 
-  const localPayload = await loadLocalTerrainSummary(tileName)
-
-  if (localPayload) {
+  const generatedPayload = await loadGeneratedTerrainSummary(tileName)
+  if (generatedPayload) {
     return {
       record: {
-        ...localPayload,
-        positionBand: inferTerrainPositionBand(localPayload),
+        ...generatedPayload,
+        positionBand: inferTerrainPositionBand(generatedPayload),
       },
       precision: 'coarse',
     }
   }
 
-  const remotePayload = await loadRemoteTerrainSummary(tileName)
-  if (!remotePayload) {
+  const processedPayload = await processDemTerrainSummary(
+    tileName,
+    tileNameToBounds(tileName) ?? bounds,
+  )
+
+  if (!processedPayload) {
     return undefined
   }
 
+  await writeGeneratedObject(
+    `terrain-summaries/${tileName}.json`,
+    JSON.stringify(processedPayload),
+    { httpMetadata: { contentType: 'application/json' } },
+  )
+
   return {
     record: {
-      ...remotePayload,
-      positionBand: inferTerrainPositionBand(remotePayload),
+      ...processedPayload,
+      positionBand: inferTerrainPositionBand(processedPayload),
     },
-    precision: 'coarse',
+    precision: 'cell',
   }
 }
 
@@ -426,326 +471,203 @@ async function loadWorldPopMetadata(iso3: string) {
   }
 }
 
-async function loadRasterTerrainSummary(
-  center: [number, number],
-  bounds: BoundsTuple,
-): Promise<TerrainSummaryRecord | undefined> {
-  const raster = await loadTerrainRaster()
-  if (!raster) {
-    return undefined
-  }
-
-  const summary = await summarizeTerrainBounds(raster, bounds)
-  if (!summary) {
-    return undefined
-  }
-
-  const record: TerrainSummaryRecord = {
-    tileName: `cell_${center[1].toFixed(4)}_${center[0].toFixed(4)}`,
-    stats: summary.stats,
-    coverage: {
-      landCoveragePct: summary.landCoveragePct,
-    },
-  }
-
-  return {
-    ...record,
-    positionBand: inferTerrainPositionBand(record),
-  }
-}
-
-async function loadTerrainRaster() {
-  const localCandidates = [
-    process.env.TERRAIN_RASTER_PATH,
-    path.join(process.cwd(), 'data', 'terrain.tif'),
-    path.join(process.cwd(), 'data', 'terrain.tiff'),
-    path.join(process.cwd(), 'public', 'terrain.tif'),
-    path.join(process.cwd(), 'public', 'terrain.tiff'),
-  ].filter(Boolean) as string[]
-
-  for (const localPath of localCandidates) {
-    const raster = await loadRasterFromPath(localPath)
-    if (raster) {
-      return raster
-    }
-  }
-
-  const terrainRasterKey = process.env.TERRAIN_RASTER_KEY
-  if (!terrainRasterKey) {
-    return undefined
-  }
-
-  return loadRasterFromS3Key(terrainRasterKey)
-}
-
-async function loadWorldPopRaster(
+async function loadGeneratedPopulationSummary(
   iso3: string,
-  metadata: Awaited<ReturnType<typeof loadWorldPopMetadata>>,
-) {
-  const fileCandidates = buildWorldPopRasterCandidates(iso3, metadata)
-  const rasterDirCandidates = [
-    process.env.WORLDPOP_RASTER_DIR,
-    path.join(process.cwd(), 'data', 'worldpop'),
-    path.join(process.cwd(), 'public', 'worldpop'),
-  ].filter(Boolean) as string[]
-
-  for (const directory of rasterDirCandidates) {
-    for (const filename of fileCandidates) {
-      const raster = await loadRasterFromPath(path.join(directory, filename))
-      if (raster) {
-        return raster
-      }
-    }
-  }
-
-  const prefix = (process.env.WORLDPOP_RASTER_PREFIX ?? DEFAULT_WORLDPOP_PREFIX)
-    .replace(/\/+$/, '')
-
-  for (const filename of fileCandidates) {
-    const raster = await loadRasterFromS3Key(`${prefix}/${filename}`)
-    if (raster) {
-      return raster
-    }
-  }
-
-  return undefined
-}
-
-async function loadDatabaseTerrainSummary(
   tileName: string,
-): Promise<TerrainSummaryRecord | undefined> {
-  const { db, schema } = await import('../../../db/client.ts')
-  const row = await db.query.terrainSummaries.findFirst({
-    where: eq(schema.terrainSummaries.tileName, tileName),
-  })
-
-  if (!row) {
-    return undefined
-  }
-
-  return {
-    tileName: row.tileName,
-    stats: {
-      min: row.minElevationM,
-      max: row.maxElevationM,
-      mean: row.meanElevationM,
-    },
-    coverage: {
-      landCoveragePct: row.landCoveragePct,
-    },
-  }
-}
-
-async function loadLocalTerrainSummary(
-  tileName: string,
-): Promise<TerrainSummaryRecord | undefined> {
-  const envDir = process.env.TOPOGRAPHICAL_SUMMARY_DIR
-  const candidateDirs = [
-    ...(envDir ? [envDir] : []),
-    path.join(process.cwd(), 'topographical_summaries'),
-    path.join(process.cwd(), 'public', 'topographical_summaries'),
-    path.join(process.cwd(), '.output', 'public', 'topographical_summaries'),
+  bounds: BoundsTuple,
+): Promise<z.infer<typeof populationSummarySchema> | undefined> {
+  const cellKey = populationCellKey(bounds)
+  const candidates = [
+    `population/${iso3}/${tileName}/${cellKey}.json`,
+    `population/${iso3.toLowerCase()}/${tileName}/${cellKey}.json`,
+    `population/${iso3}/${tileName}.json`,
+    `population/${iso3.toLowerCase()}/${tileName}.json`,
+    `worldpop/${iso3}/${tileName}/${cellKey}.json`,
+    `worldpop/${iso3.toLowerCase()}/${tileName}/${cellKey}.json`,
+    `worldpop/${iso3}/${tileName}.json`,
+    `worldpop/${iso3.toLowerCase()}/${tileName}.json`,
   ]
 
-  for (const directory of candidateDirs) {
-    try {
-      const payload = await readFile(
-        path.join(directory, `${tileName}.json`),
-        'utf8',
-      )
-      return terrainSummarySchema.parse(JSON.parse(payload))
-    } catch {
-      continue
+  for (const key of candidates) {
+    const payload = await readGeneratedJson(key, populationSummarySchema)
+    if (payload) {
+      return payload
     }
   }
 
   return undefined
 }
 
-async function loadRemoteTerrainSummary(
+async function loadGeneratedLandCoverSummary(
   tileName: string,
-): Promise<TerrainSummaryRecord | undefined> {
-  const client = createS3Client()
-  const bucket = process.env.SOURCE_BUCKET
+  bounds: BoundsTuple,
+): Promise<z.infer<typeof landCoverSummarySchema> | undefined> {
+  const cellKey = populationCellKey(bounds)
+  const candidates = [
+    `landcover/${tileName}/${cellKey}.json`,
+    `worldcover/${tileName}/${cellKey}.json`,
+    `landcover/${tileName}.json`,
+    `worldcover/${tileName}.json`,
+  ]
 
-  if (!client || !bucket) {
+  for (const key of candidates) {
+    const payload = await readGeneratedJson(key, landCoverSummarySchema)
+    if (payload) {
+      return payload
+    }
+  }
+
+  return undefined
+}
+
+async function processAndStoreLandCoverSummary(
+  tileName: string,
+  bounds: BoundsTuple,
+) {
+  const payload = await processWorldCoverLandCoverSummary({ bounds })
+  if (!payload || payload.validPixelCount <= 0) {
     return undefined
   }
 
+  await writeGeneratedObject(
+    `landcover/${tileName}/${populationCellKey(bounds)}.json`,
+    JSON.stringify(payload),
+    { httpMetadata: { contentType: 'application/json' } },
+  )
+
+  return payload
+}
+
+async function processAndStorePopulationSummary(
+  iso3: string,
+  tileName: string,
+  bounds: BoundsTuple,
+  metadata: Awaited<ReturnType<typeof loadWorldPopMetadata>>,
+) {
+  const rasterUrl = extractWorldPopRasterUrl(metadata?.payload)
+  if (!rasterUrl) {
+    return undefined
+  }
+
+  const payload = await processWorldPopPopulationSummary({
+    iso3,
+    bounds,
+    rasterUrl,
+    sourceYear: metadata?.populationYear ?? undefined,
+  })
+
+  if (!payload) {
+    return undefined
+  }
+
+  await writeGeneratedObject(
+    `population/${iso3}/${tileName}/${populationCellKey(bounds)}.json`,
+    JSON.stringify(payload),
+    { httpMetadata: { contentType: 'application/json' } },
+  )
+
+  return payload
+}
+
+function extractWorldPopRasterUrl(payload: unknown) {
+  const parsed =
+    typeof payload === 'string'
+      ? safeJsonParse<Record<string, unknown>>(payload)
+      : payload
+
+  if (!parsed || typeof parsed !== 'object') {
+    return undefined
+  }
+
+  const files = (parsed as { files?: unknown }).files
+  if (!Array.isArray(files)) {
+    return undefined
+  }
+
+  return files.find((file): file is string => typeof file === 'string')
+}
+
+function safeJsonParse<T>(value: string): T | undefined {
   try {
-    const response = await client.send(
-      new GetObjectCommand({
-        Bucket: bucket,
-        Key: `${getOutputPrefix()}/${tileName}.json`,
-      }),
-    )
-
-    const payload = await response.Body?.transformToString()
-    if (!payload) {
-      return undefined
-    }
-
-    return terrainSummarySchema.parse(JSON.parse(payload))
+    return JSON.parse(value) as T
   } catch {
     return undefined
   }
 }
 
-async function loadRasterFromPath(localPath: string) {
-  const cacheKey = `local:${localPath}`
-  let promise = rasterCache.get(cacheKey)
-
-  if (!promise) {
-    promise = (async () => {
-      try {
-        const dataset = await fromFile(localPath)
-        const image = await dataset.getImage()
-        return {
-          dataset,
-          image,
-          bbox: toBboxTuple(image.getBoundingBox()),
-          nodata: image.getGDALNoData(),
-        } satisfies RasterDataset
-      } catch {
-        return undefined
-      }
-    })()
-
-    rasterCache.set(cacheKey, promise)
-  }
-
-  return promise
+function populationCellKey(bounds: BoundsTuple) {
+  const [[west, south], [east, north]] = normalizeBounds(bounds)
+  return [
+    south.toFixed(4),
+    west.toFixed(4),
+    north.toFixed(4),
+    east.toFixed(4),
+  ].join('_')
 }
 
-async function loadRasterFromS3Key(key: string) {
-  const cacheKey = `s3:${key}`
-  let promise = rasterCache.get(cacheKey)
+async function loadDatabaseTerrainSummary(
+  tileName: string,
+): Promise<TerrainSummaryRecord | undefined> {
+  try {
+    const { db, schema } = await import('../../../db/client.ts')
+    const row = await db.query.terrainSummaries.findFirst({
+      where: eq(schema.terrainSummaries.tileName, tileName),
+    })
 
-  if (!promise) {
-    promise = (async () => {
-      const client = createS3Client()
-      const bucket = process.env.SOURCE_BUCKET
-
-      if (!client || !bucket) {
-        return undefined
-      }
-
-      try {
-        const response = await client.send(
-          new GetObjectCommand({
-            Bucket: bucket,
-            Key: key,
-          }),
-        )
-
-        const bytes = await response.Body?.transformToByteArray()
-        if (!bytes) {
-          return undefined
-        }
-
-        const dataset = await fromArrayBuffer(
-          bytes.buffer.slice(
-            bytes.byteOffset,
-            bytes.byteOffset + bytes.byteLength,
-          ) as ArrayBuffer,
-        )
-        const image = await dataset.getImage()
-
-        return {
-          dataset,
-          image,
-          bbox: toBboxTuple(image.getBoundingBox()),
-          nodata: image.getGDALNoData(),
-        } satisfies RasterDataset
-      } catch {
-        return undefined
-      }
-    })()
-
-    rasterCache.set(cacheKey, promise)
-  }
-
-  return promise
-}
-
-async function summarizeTerrainBounds(
-  raster: RasterDataset,
-  bounds: BoundsTuple,
-) {
-  const rasterBbox = intersectBboxes(toBboxTuple(flattenBounds(bounds)), raster.bbox)
-  if (!rasterBbox) {
-    return undefined
-  }
-
-  const samples = await raster.dataset.readRasters({
-    bbox: rasterBbox,
-    interleave: true,
-    fillValue: raster.nodata ?? -9999,
-  })
-
-  let min = Number.POSITIVE_INFINITY
-  let max = Number.NEGATIVE_INFINITY
-  let sum = 0
-  let validCount = 0
-  const totalCount = samples.length
-
-  for (const rawValue of samples as Iterable<number>) {
-    const value = Number(rawValue)
-    if (!Number.isFinite(value) || value === raster.nodata || value <= -9999) {
-      continue
+    if (!row) {
+      return undefined
     }
 
-    min = Math.min(min, value)
-    max = Math.max(max, value)
-    sum += value
-    validCount += 1
-  }
-
-  if (validCount === 0) {
+    return {
+      tileName: row.tileName,
+      stats: {
+        min: row.minElevationM,
+        max: row.maxElevationM,
+        mean: row.meanElevationM,
+      },
+      coverage: {
+        landCoveragePct: row.landCoveragePct,
+      },
+    }
+  } catch {
     return undefined
-  }
-
-  return {
-    stats: {
-      min,
-      max,
-      mean: sum / validCount,
-    },
-    landCoveragePct: (validCount / Math.max(totalCount, 1)) * 100,
   }
 }
 
-async function summarizePopulationBounds(
-  raster: RasterDataset,
-  bounds: BoundsTuple,
-) {
-  const rasterBbox = intersectBboxes(toBboxTuple(flattenBounds(bounds)), raster.bbox)
-  if (!rasterBbox) {
+async function loadGeneratedTerrainSummary(
+  tileName: string,
+): Promise<TerrainSummaryRecord | undefined> {
+  const candidates = [
+    `topographical_summaries/${tileName}.json`,
+    `terrain-summaries/${tileName}.json`,
+    `terrain/${tileName}.json`,
+  ]
+
+  for (const key of candidates) {
+    const payload = await readGeneratedJson(key, terrainSummarySchema)
+    if (payload) {
+      return payload
+    }
+  }
+
+  return undefined
+}
+
+function tileNameToBounds(tileName: string): BoundsTuple | undefined {
+  const match = tileName.match(/^(\d+)([NS])_(\d+)([WE])$/)
+  if (!match) {
     return undefined
   }
 
-  const samples = await raster.dataset.readRasters({
-    bbox: rasterBbox,
-    interleave: true,
-    fillValue: 0,
-  })
+  const [, latValue, latHemisphere, lonValue, lonHemisphere] = match
+  const south =
+    latHemisphere === 'N' ? Number(latValue) : -(Number(latValue) + 1)
+  const west = lonHemisphere === 'W' ? -Number(lonValue) : Number(lonValue) - 1
 
-  let count = 0
-
-  for (const rawValue of samples as Iterable<number>) {
-    const value = Number(rawValue)
-    if (!Number.isFinite(value) || value <= 0 || value === raster.nodata) {
-      continue
-    }
-    count += value
-  }
-
-  const areaSqKm = estimateBoundsAreaSqKm(bounds)
-
-  return {
-    count,
-    density: areaSqKm > 0 ? count / areaSqKm : 0,
-  }
+  return [
+    [west, south],
+    [west + 1, south + 1],
+  ]
 }
 
 function resolveCountryByPoint(center: [number, number]) {
@@ -756,89 +678,4 @@ function resolveCountryByPoint(center: [number, number]) {
   }
 
   return undefined
-}
-
-function flattenBounds(bounds: BoundsTuple): [number, number, number, number] {
-  const [[west, south], [east, north]] = normalizeBounds(bounds)
-  return [west, south, east, north]
-}
-
-function intersectBboxes(
-  left: [number, number, number, number],
-  right: [number, number, number, number],
-): [number, number, number, number] | null {
-  const west = Math.max(left[0], right[0])
-  const south = Math.max(left[1], right[1])
-  const east = Math.min(left[2], right[2])
-  const north = Math.min(left[3], right[3])
-
-  if (west >= east || south >= north) {
-    return null
-  }
-
-  return [west, south, east, north]
-}
-
-function toBboxTuple(value: number[]): [number, number, number, number] {
-  return [value[0], value[1], value[2], value[3]]
-}
-
-function buildWorldPopRasterCandidates(
-  iso3: string,
-  metadata: Awaited<ReturnType<typeof loadWorldPopMetadata>>,
-) {
-  const candidates = new Set<string>()
-  const payload = metadata?.payload
-
-  const addCandidate = (value: string | null | undefined) => {
-    if (!value) {
-      return
-    }
-
-    const filename = path.basename(value)
-    if (/\.(tif|tiff)$/i.test(filename)) {
-      candidates.add(filename)
-    }
-  }
-
-  addCandidate(payload?.data_file)
-  for (const filename of payload?.files ?? []) {
-    addCandidate(filename)
-  }
-
-  candidates.add(`${iso3.toLowerCase()}.tif`)
-  candidates.add(`${iso3.toLowerCase()}.tiff`)
-  candidates.add(`${iso3.toLowerCase()}_population.tif`)
-  candidates.add(`${iso3.toLowerCase()}_population.tiff`)
-  candidates.add(`${iso3.toUpperCase()}.tif`)
-  candidates.add(`${iso3.toUpperCase()}.tiff`)
-
-  return Array.from(candidates)
-}
-
-function createS3Client() {
-  const accessKeyId = process.env.AWS_ACCESS_KEY_ID
-  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY
-  const endpoint = process.env.S3_ENDPOINT
-
-  if (!accessKeyId || !secretAccessKey || !endpoint) {
-    return null
-  }
-
-  return new S3Client({
-    region: process.env.AWS_REGION ?? 'auto',
-    endpoint,
-    credentials: {
-      accessKeyId,
-      secretAccessKey,
-    },
-    forcePathStyle: true,
-  })
-}
-
-function getOutputPrefix() {
-  return (process.env.OUTPUT_PREFIX ?? DEFAULT_OUTPUT_PREFIX).replace(
-    /\/+$/,
-    '',
-  )
 }

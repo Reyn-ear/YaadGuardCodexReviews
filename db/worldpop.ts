@@ -62,41 +62,38 @@ let schemaReady: Promise<void> | null = null
 export async function ensureWorldpopSchema() {
   if (!schemaReady) {
     schemaReady = (async () => {
-      await db.execute(sql`
+      await db.run(sql`
         CREATE TABLE IF NOT EXISTS worldpop_country_payloads (
-          worldpop_id bigint PRIMARY KEY NOT NULL,
+          worldpop_id integer PRIMARY KEY NOT NULL,
           dataset_alias text NOT NULL,
           iso3 text NOT NULL,
           country_name text NOT NULL,
           continent text,
           population_year integer NOT NULL,
-          source_date date,
-          payload jsonb NOT NULL,
-          synced_at timestamp with time zone NOT NULL DEFAULT now(),
-          created_at timestamp with time zone NOT NULL DEFAULT now(),
-          updated_at timestamp with time zone NOT NULL DEFAULT now()
+          source_date text,
+          payload text NOT NULL,
+          synced_at text NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          created_at text NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at text NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
       `)
 
-      await db.execute(sql`
+      await db.run(sql`
         CREATE UNIQUE INDEX IF NOT EXISTS worldpop_country_payloads_dataset_iso3_year_idx
         ON worldpop_country_payloads (dataset_alias, iso3, population_year)
       `)
 
-      await db.execute(sql`
+      await db.run(sql`
         CREATE INDEX IF NOT EXISTS worldpop_country_payloads_iso3_year_idx
         ON worldpop_country_payloads (iso3, population_year DESC)
       `)
 
-      await db.execute(sql`
+      await db.run(sql`
         CREATE INDEX IF NOT EXISTS worldpop_country_payloads_dataset_idx
         ON worldpop_country_payloads (dataset_alias)
       `)
 
-      await db.execute(sql`
-        CREATE INDEX IF NOT EXISTS worldpop_country_payloads_payload_gin_idx
-        ON worldpop_country_payloads USING gin (payload)
-      `)
+      // D1/SQLite stores payload as JSON text; query-critical fields are indexed above.
     })()
   }
 
@@ -158,8 +155,8 @@ export async function upsertWorldPopRecords(
         populationYear: sql`excluded.population_year`,
         sourceDate: sql`excluded.source_date`,
         payload: sql`excluded.payload`,
-        syncedAt: sql`now()`,
-        updatedAt: sql`now()`,
+        syncedAt: sql`CURRENT_TIMESTAMP`,
+        updatedAt: sql`CURRENT_TIMESTAMP`,
       },
     })
 

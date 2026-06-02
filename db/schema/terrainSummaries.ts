@@ -1,39 +1,30 @@
 import {
-  doublePrecision,
   index,
   integer,
-  pgTable,
+  real,
+  sqliteTable,
   text,
-  timestamp,
-} from 'drizzle-orm/pg-core'
+} from 'drizzle-orm/sqlite-core'
+import { sql } from 'drizzle-orm'
 
-export const terrainSummaries = pgTable(
+export const terrainSummaries = sqliteTable(
   'terrain_summaries',
   {
     tileName: text('tile_name').primaryKey(),
     sourceKey: text('source_key').notNull(),
-    minElevationM: doublePrecision('min_elevation_m').notNull(),
-    maxElevationM: doublePrecision('max_elevation_m').notNull(),
-    meanElevationM: doublePrecision('mean_elevation_m').notNull(),
-    landCoveragePct: doublePrecision('land_coverage_pct').notNull(),
+    minElevationM: real('min_elevation_m').notNull(),
+    maxElevationM: real('max_elevation_m').notNull(),
+    meanElevationM: real('mean_elevation_m').notNull(),
+    landCoveragePct: real('land_coverage_pct').notNull(),
     pixelCount: integer('pixel_count').notNull(),
     validPixelCount: integer('valid_pixel_count').notNull(),
     landPixelCount: integer('land_pixel_count').notNull(),
-    sourceUpdatedAt: timestamp('source_updated_at', {
-      mode: 'string',
-      withTimezone: true,
-    }),
-    createdAt: timestamp('created_at', {
-      mode: 'string',
-      withTimezone: true,
-    })
-      .defaultNow()
+    sourceUpdatedAt: text('source_updated_at'),
+    createdAt: text('created_at')
+      .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
-    updatedAt: timestamp('updated_at', {
-      mode: 'string',
-      withTimezone: true,
-    })
-      .defaultNow()
+    updatedAt: text('updated_at')
+      .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
   },
   (table) => [index('terrain_summaries_source_key_idx').on(table.sourceKey)],
