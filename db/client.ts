@@ -1,30 +1,38 @@
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
-import * as schema from "./schema";
+import { drizzle } from 'drizzle-orm/d1'
+import { env } from 'cloudflare:workers'
+import * as schema from './schema'
 
-try {
-  if (!process.env.DATABASE_URL && typeof process.loadEnvFile === "function") {
-    process.loadEnvFile();
+type D1Client = ReturnType<typeof drizzle<typeof schema>>
+
+let cachedDb: D1Client | null = null
+
+function resolveD1Binding(database?: D1Database) {
+  const binding = database ?? (env as Partial<CloudflareBindings>).DB
+
+  if (!binding) {
+    throw new Error('Missing Cloudflare D1 binding: DB')
   }
-} catch {
-  // Ignore missing env files here; the explicit DATABASE_URL check below handles configuration errors.
+
+  return binding
 }
 
-const databaseUrl = process.env.DATABASE_URL;
-
-if (!databaseUrl) {
-  throw new Error("Missing required environment variable: DATABASE_URL");
+export function createDb(database?: D1Database) {
+  return drizzle(resolveD1Binding(database), { schema })
 }
 
-function shouldUseSsl(connectionString: string) {
-  return connectionString.includes("railway.internal") || connectionString.includes("proxy.rlwy.net");
+export function getDb(database?: D1Database) {
+  if (database) {
+    return createDb(database)
+  }
+
+  cachedDb ??= createDb()
+  return cachedDb
 }
 
-export const pool = new Pool({
-  connectionString: databaseUrl,
-  ssl: shouldUseSsl(databaseUrl) ? { rejectUnauthorized: false } : undefined,
-});
+export const db = new Proxy({} as D1Client, {
+  get(_target, property, receiver) {
+    return Reflect.get(getDb(), property, receiver)
+  },
+})
 
-export const db = drizzle(pool, { schema });
-
-export { schema };
+export { schema }

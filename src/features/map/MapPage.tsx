@@ -14,7 +14,6 @@ import { AnimatePresence, motion } from 'motion/react'
 import maplibregl from 'maplibre-gl'
 import type { MapLayerMouseEvent } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import winstonImg from '../../../images/WinstonTheWeathervane.png'
 import {
   DEFAULT_MAP_CENTER,
   DEFAULT_MAP_ZOOM,
@@ -35,7 +34,6 @@ import { computeWaterDepths } from './rain-sim'
 import { fetchSubGridElevations } from './elevation'
 import { RainControls } from './RainControls'
 import './rain-controls.css'
-import { WinstonChat } from './WinstonChat'
 import type {
   BoundsTuple,
   GridCellFeature,
@@ -108,8 +106,7 @@ function getLandslideRiskSummary(metrics: RegionInsightResponse['metrics']) {
   if (slopeAngle >= 14) {
     return {
       band: 'Moderate',
-      bandClass:
-        'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30',
+      bandClass: 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30',
       explanation:
         nearbyStormCount > 0
           ? 'Moderate slope combined with nearby storm exposure suggests some rain-triggered landslide susceptibility.'
@@ -146,7 +143,6 @@ export default function MapPage() {
     !isTyping && searchQuery.trim() !== '' && searchQuery !== debouncedQuery
   const [terrainView, setTerrainView] = useState<TerrainView | null>(null)
   const [showTerrainPopup, setShowTerrainPopup] = useState(false)
-  const [isAIChatOpen, setIsAIChatOpen] = useState(false)
   const typingTimeoutRef = useRef<number | null>(null)
   const analysisRequestIdRef = useRef(0)
 
@@ -269,7 +265,6 @@ export default function MapPage() {
   const handleCellSelect = useEffectEvent((feature: GridCellFeature) => {
     setSearchMessage(null)
     setShowTerrainPopup(false)
-    setIsAIChatOpen(false)
     const centerLng = feature.properties.centerLng
     const centerLat = feature.properties.centerLat
     const halfLatStep = GRID_LAT_STEP / 2
@@ -301,7 +296,6 @@ export default function MapPage() {
     })
     setTerrainView(null)
     setShowTerrainPopup(false)
-    setIsAIChatOpen(false)
     setSearchQuery('')
     setSuggestions([])
     setIsDropdownOpen(false)
@@ -811,7 +805,8 @@ export default function MapPage() {
                                 Terrain Relief
                               </span>
                               <strong className="text-base text-white">
-                                {panelState.insight.metrics.reliefM !== undefined
+                                {panelState.insight.metrics.reliefM !==
+                                undefined
                                   ? `${panelState.insight.metrics.reliefM}m`
                                   : 'N/A'}
                               </strong>
@@ -988,6 +983,61 @@ export default function MapPage() {
                     </div>
                   </motion.div>
 
+                  {/* 8. Land-Cover Context */}
+                  <motion.div
+                    variants={{
+                      hidden: { opacity: 0, y: 10 },
+                      visible: { opacity: 1, y: 0 },
+                    }}
+                    className="map-page__section"
+                  >
+                    <p className="map-page__section-label text-slate-400 font-medium">
+                      Land-Cover Context
+                    </p>
+                    <div className="mt-3 bg-slate-800/50 p-3 rounded-md border border-slate-700/50">
+                      {panelState.insight.metrics.builtUpPct !== undefined ||
+                      panelState.insight.metrics.treeCoverPct !== undefined ||
+                      panelState.insight.metrics.waterPct !== undefined ? (
+                        <div className="grid grid-cols-3 gap-3 text-sm">
+                          <div>
+                            <span className="text-xs text-slate-400 block mb-1">
+                              Built-up
+                            </span>
+                            <strong className="text-base text-white">
+                              {panelState.insight.metrics.builtUpPct ?? 0}%
+                            </strong>
+                          </div>
+                          <div>
+                            <span className="text-xs text-slate-400 block mb-1">
+                              Tree Cover
+                            </span>
+                            <strong className="text-base text-white">
+                              {panelState.insight.metrics.treeCoverPct ?? 0}%
+                            </strong>
+                          </div>
+                          <div>
+                            <span className="text-xs text-slate-400 block mb-1">
+                              Water/Wetland
+                            </span>
+                            <strong className="text-base text-white">
+                              {(
+                                (panelState.insight.metrics.waterPct ?? 0) +
+                                (panelState.insight.metrics.wetlandPct ?? 0) +
+                                (panelState.insight.metrics.mangrovePct ?? 0)
+                              ).toFixed(1)}
+                              %
+                            </strong>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-300">
+                          ESA WorldCover data is currently unavailable for this
+                          specific analysis window.
+                        </p>
+                      )}
+                    </div>
+                  </motion.div>
+
                   {terrainView && (
                     <motion.button
                       type="button"
@@ -1009,28 +1059,6 @@ export default function MapPage() {
             </AnimatePresence>
           </div>
         </aside>
-
-        {/* Winston AI UI */}
-        {terrainView && (
-          <WinstonChat
-            imageSrc={winstonImg}
-            isOpen={isAIChatOpen}
-            onClose={() => setIsAIChatOpen(false)}
-            onToggleOpen={() => setIsAIChatOpen((open) => !open)}
-            region={{
-              kind: 'cell',
-              label: terrainView.label,
-              center: terrainView.center,
-              bounds: terrainView.bounds,
-              gridCellId: terrainView.cellId,
-            }}
-            sidebarInsight={
-              panelState.status === 'ready' && panelState.kind === 'cell'
-                ? panelState.insight
-                : undefined
-            }
-          />
-        )}
       </section>
 
       {showTerrainPopup && terrainView && (

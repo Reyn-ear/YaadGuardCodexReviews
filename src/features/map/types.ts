@@ -23,7 +23,10 @@ export type GridCellFeature = Feature<Polygon, GridCellProperties> & {
   id: number
 }
 
-export type GridFeatureCollection = FeatureCollection<Polygon, GridCellProperties>
+export type GridFeatureCollection = FeatureCollection<
+  Polygon,
+  GridCellProperties
+>
 
 export interface RegionInsightInput {
   kind: 'cell' | 'search'
@@ -66,6 +69,12 @@ export interface RegionInsightMetrics {
   mostRecentNearbyStormYear?: number
   estimatedPopulation?: number
   populationDensityPerSqKm?: number
+  builtUpPct?: number
+  treeCoverPct?: number
+  croplandPct?: number
+  waterPct?: number
+  wetlandPct?: number
+  mangrovePct?: number
 }
 
 export interface HistoricalAnalog {
@@ -77,6 +86,7 @@ export interface HistoricalAnalog {
 
 export interface DataQuality {
   terrainAvailable: boolean
+  landCoverAvailable: boolean
   surgeAvailable: boolean
   stormHistoryAvailable: boolean
   confidenceNotes: string[]

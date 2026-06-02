@@ -1,0 +1,81 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "yaad-guard",
+  "compatibility_date": "2026-05-07",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "src/server.ts",
+  "assets": {
+    "directory": ".output/public",
+    "binding": "ASSETS",
+  },
+  "observability": {
+    "enabled": true,
+  },
+  "vars": {
+    "ACTIVE_MANIFEST_KEY": "manifests/active.json",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "yaad-guard",
+      "database_id": "d47fc65a-8a4c-4a52-b3fd-5b731755db6a",
+      "migrations_dir": "db/migrations",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "YAAD_GUARD_BUCKET",
+      "bucket_name": "yaad-guard-artifacts",
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "INGESTION_QUEUE",
+        "queue": "yaad-guard-ingestion",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "yaad-guard-ingestion",
+        "max_batch_size": 5,
+        "max_batch_timeout": 30,
+        "max_retries": 3,
+      },
+    ],
+  },
+  "workflows": [
+    {
+      "binding": "DATASET_INGESTION",
+      "name": "yaad-guard-dataset-ingestion",
+      "class_name": "DatasetIngestionWorkflow",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "GEOSPATIAL_PROCESSOR",
+        "class_name": "GeospatialProcessor",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["GeospatialProcessor"],
+    },
+  ],
+  "containers": [
+    {
+      "name": "yaad-guard-geospatial-processor",
+      "class_name": "GeospatialProcessor",
+      "image": "./containers/geospatial/Dockerfile",
+      "image_build_context": "./containers/geospatial",
+      "max_instances": 6,
+      "instance_type": "standard-1",
+    },
+  ],
+  "dev": {
+    "enable_containers": false,
+  },
+}
