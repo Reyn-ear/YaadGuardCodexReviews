@@ -381,7 +381,7 @@ export default function MapPage() {
     })
       .then((result) => {
         if (cancelled) return
-        if (result.success && result.elevations) {
+        if (result.success) {
           setSubGridElevations(result.elevations)
           setWaterDepths(computeWaterDepths(result.elevations, mmPerHr))
         }
@@ -396,7 +396,6 @@ export default function MapPage() {
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terrainView])
 
   // Handle rain slider change
@@ -562,7 +561,7 @@ export default function MapPage() {
           <button
             type="button"
             onClick={() => setIsSidebarOpen(true)}
-            className="fixed right-5 bottom-5 z-20 flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(15,23,42,0.8)] text-[var(--landing-accent)] shadow-lg backdrop-blur-md transition-transform hover:scale-110 sm:right-8 sm:bottom-8"
+            className="fixed right-5 bottom-5 z-20 flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(15,23,42,0.8)] text-[var(--accent)] shadow-lg backdrop-blur-md transition-transform hover:scale-110 sm:right-8 sm:bottom-8"
             aria-label="Open analysis sidebar"
           >
             <MapPinned size={24} />
@@ -1083,31 +1082,10 @@ function MapTopbar() {
       >
         <CloudLightning
           aria-hidden="true"
-          className="h-[1.4rem] w-[1.4rem] text-[var(--landing-accent)]"
+          className="h-[1.4rem] w-[1.4rem] text-[var(--accent)]"
         />
         <span>Yaad Guard</span>
       </Link>
-
-      <div className="flex items-center gap-2 sm:gap-6">
-        <Link
-          to="/"
-          className="hidden rounded-full px-4 py-2 text-[0.9rem] font-medium tracking-[0.3px] text-[var(--landing-text-secondary)] no-underline transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] hover:bg-white/5 hover:text-[var(--landing-text-primary)] md:inline"
-        >
-          Home
-        </Link>
-        <Link
-          to="/about"
-          className="hidden rounded-full px-4 py-2 text-[0.9rem] font-medium tracking-[0.3px] text-[var(--landing-text-secondary)] no-underline transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] hover:bg-white/5 hover:text-[var(--landing-text-primary)] md:inline"
-        >
-          About
-        </Link>
-        <a
-          href="/#technology"
-          className="hidden rounded-full px-4 py-2 text-[0.9rem] font-medium tracking-[0.3px] text-[var(--landing-text-secondary)] no-underline transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] hover:bg-white/5 hover:text-[var(--landing-text-primary)] md:inline"
-        >
-          Technology
-        </a>
-      </div>
     </nav>
   )
 }

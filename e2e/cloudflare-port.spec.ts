@@ -8,15 +8,7 @@ test('Cloudflare port renders the core map workflow without Winston chat', async
 
   await page.goto(baseUrl)
 
-  await expect(
-    page.getByRole('heading', {
-      name: /AI-Powered Atmospheric Intelligence/i,
-    }),
-  ).toBeVisible()
-
-  await page.getByRole('link', { name: /Launch Grid Map/i }).click()
-
-  await expect(page).toHaveURL(/\/map/)
+  await expect(page).toHaveURL(/\/$/)
   await expect(page.getByRole('link', { name: 'Yaad Guard' })).toBeVisible()
   await expect(page.getByLabel('Search locations')).toBeVisible()
   await expect(page.getByText('Region Insights')).toBeVisible()
