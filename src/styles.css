@@ -402,7 +402,7 @@ a {
 
 .map-page__info-card {
   position: absolute;
-  right: 1.25rem;
+  left: 1.25rem;
   bottom: 1.25rem;
   z-index: 20;
   width: min(360px, calc(100vw - 2.5rem));
