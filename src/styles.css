@@ -400,6 +400,177 @@ a {
   font-size: 0.83rem;
 }
 
+.map-page__info-card {
+  position: absolute;
+  top: 5.8rem;
+  left: 1.25rem;
+  z-index: 20;
+  width: min(360px, calc(100vw - 2.5rem));
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.1rem 1.15rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 1.4rem;
+  background:
+    radial-gradient(circle at top right, rgba(56, 189, 248, 0.16), transparent 42%),
+    rgba(8, 15, 26, 0.48);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(20px);
+}
+
+.map-page__info-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.map-page__info-card-heading h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1.08rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.map-page__info-card-pill {
+  flex-shrink: 0;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.map-page__info-gauge {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.map-page__info-gauge-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.map-page__info-gauge-row span {
+  color: var(--text-secondary);
+  font-size: 0.73rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.map-page__info-gauge-row strong {
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.map-page__info-gauge-track {
+  position: relative;
+  height: 0.75rem;
+  overflow: hidden;
+  border: 1px solid rgba(96, 212, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.map-page__info-gauge-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.35), rgba(96, 212, 255, 0.95));
+  box-shadow: 0 0 22px rgba(56, 189, 248, 0.24);
+}
+
+.map-page__info-gauge-threshold,
+.map-page__info-gauge-marker {
+  position: absolute;
+  top: -0.18rem;
+  bottom: -0.18rem;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.22);
+  transform: translateX(-50%);
+}
+
+.map-page__info-gauge-threshold {
+  background: rgba(251, 191, 36, 0.7);
+}
+
+.map-page__info-gauge-marker {
+  width: 2px;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.map-page__info-gauge-labels {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.map-page__info-copy {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.94rem;
+  line-height: 1.65;
+}
+
+.map-page__info-details {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.8rem 1rem;
+  border: 1px solid rgba(96, 212, 255, 0.24);
+  border-radius: 0.95rem;
+  background: rgba(96, 212, 255, 0.08);
+  color: var(--accent);
+  font-size: 0.92rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition:
+    transform 0.2s ease,
+    background 0.2s ease,
+    border-color 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.map-page__info-details:hover:not(:disabled) {
+  background: rgba(96, 212, 255, 0.14);
+  border-color: rgba(96, 212, 255, 0.38);
+  transform: translateY(-1px);
+}
+
+.map-page__info-details:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.map-page__info-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+}
+
+.map-page__info-meta svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
 .map-page__dropdown {
   width: 100%;
   margin: 0;
@@ -661,6 +832,11 @@ a {
     top: 8.25rem;
   }
 
+  .map-page__info-card {
+    top: 8.25rem;
+    width: min(340px, calc(100vw - 2rem));
+  }
+
   .map-page__sidebar {
     top: auto;
     right: 1rem;
@@ -676,6 +852,13 @@ a {
   .map-page__search {
     top: 9.5rem;
     width: calc(100% - 1.25rem);
+  }
+
+  .map-page__info-card {
+    top: 14rem;
+    left: 0.625rem;
+    width: calc(100% - 1.25rem);
+    border-radius: 1.25rem;
   }
 
   .map-page__search-box {
@@ -696,6 +879,11 @@ a {
 
   .map-page__metrics {
     grid-template-columns: 1fr;
+  }
+
+  .map-page__info-card {
+    gap: 0.85rem;
+    padding: 1rem;
   }
 }
 
