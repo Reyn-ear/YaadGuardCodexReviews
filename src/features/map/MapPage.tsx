@@ -34,6 +34,7 @@ import { computeWaterDepths } from './rain-sim'
 import { fetchSubGridElevations } from './elevation'
 import { RainControls } from './RainControls'
 import './rain-controls.css'
+import { InfoCard } from './InfoCard'
 import type {
   BoundsTuple,
   GridCellFeature,
@@ -44,7 +45,7 @@ import type {
 } from './types'
 import { TerrainPopup } from './TerrainPopup'
 
-type PanelState =
+export type PanelState =
   | { status: 'empty' }
   | { status: 'loading'; label: string }
   | {
@@ -232,7 +233,6 @@ export default function MapPage() {
     analysisRequestIdRef.current = requestId
 
     setPanelState({ status: 'loading', label: payload.label })
-    setIsSidebarOpen(true)
 
     try {
       const insight = await getRegionInsights({ data: payload })
@@ -258,7 +258,6 @@ export default function MapPage() {
         message:
           'Hazard signals could not be calculated for this location. Check the server data sources and try again.',
       })
-      setIsSidebarOpen(true)
     }
   })
 
@@ -337,7 +336,6 @@ export default function MapPage() {
           message: 'Try a broader city, parish, or landmark name.',
         })
         setSearchMessage('No results matched that search.')
-        setIsSidebarOpen(true)
         return
       }
 
@@ -350,7 +348,6 @@ export default function MapPage() {
           'The location service could not be reached. Try again in a moment.',
       })
       setSearchMessage('Search request failed. Please retry.')
-      setIsSidebarOpen(true)
     } finally {
       setIsSearching(false)
     }
@@ -381,7 +378,7 @@ export default function MapPage() {
     })
       .then((result) => {
         if (cancelled) return
-        if (result.success && result.elevations) {
+        if (result.success) {
           setSubGridElevations(result.elevations)
           setWaterDepths(computeWaterDepths(result.elevations, mmPerHr))
         }
@@ -396,7 +393,6 @@ export default function MapPage() {
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terrainView])
 
   // Handle rain slider change
@@ -419,6 +415,12 @@ export default function MapPage() {
           onCellSelect={handleCellSelect}
           waterDepths={waterDepths.length > 0 ? waterDepths : null}
           selectedCellBounds={selectedCellBoundsRef.current}
+        />
+
+        <InfoCard
+          panelState={panelState}
+          mmPerHr={mmPerHr}
+          onDetailsClick={() => setIsSidebarOpen(true)}
         />
 
         <div className="map-page__search">
@@ -558,18 +560,8 @@ export default function MapPage() {
           ) : null}
         </div>
 
-        {!isSidebarOpen && panelState.status !== 'empty' && (
-          <button
-            type="button"
-            onClick={() => setIsSidebarOpen(true)}
-            className="fixed right-5 bottom-5 z-20 flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(15,23,42,0.8)] text-[var(--landing-accent)] shadow-lg backdrop-blur-md transition-transform hover:scale-110 sm:right-8 sm:bottom-8"
-            aria-label="Open analysis sidebar"
-          >
-            <MapPinned size={24} />
-          </button>
-        )}
-
         <aside
+          id="map-page-sidebar"
           className={`map-page__sidebar ${!isSidebarOpen ? 'map-page__sidebar--hidden' : ''}`}
         >
           <div className="map-page__sidebar-header">
@@ -1083,31 +1075,10 @@ function MapTopbar() {
       >
         <CloudLightning
           aria-hidden="true"
-          className="h-[1.4rem] w-[1.4rem] text-[var(--landing-accent)]"
+          className="h-[1.4rem] w-[1.4rem] text-[var(--accent)]"
         />
         <span>Yaad Guard</span>
       </Link>
-
-      <div className="flex items-center gap-2 sm:gap-6">
-        <Link
-          to="/"
-          className="hidden rounded-full px-4 py-2 text-[0.9rem] font-medium tracking-[0.3px] text-[var(--landing-text-secondary)] no-underline transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] hover:bg-white/5 hover:text-[var(--landing-text-primary)] md:inline"
-        >
-          Home
-        </Link>
-        <Link
-          to="/about"
-          className="hidden rounded-full px-4 py-2 text-[0.9rem] font-medium tracking-[0.3px] text-[var(--landing-text-secondary)] no-underline transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] hover:bg-white/5 hover:text-[var(--landing-text-primary)] md:inline"
-        >
-          About
-        </Link>
-        <a
-          href="/#technology"
-          className="hidden rounded-full px-4 py-2 text-[0.9rem] font-medium tracking-[0.3px] text-[var(--landing-text-secondary)] no-underline transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] hover:bg-white/5 hover:text-[var(--landing-text-primary)] md:inline"
-        >
-          Technology
-        </a>
-      </div>
     </nav>
   )
 }
