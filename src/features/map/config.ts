@@ -25,6 +25,7 @@ export const WATER_FILL_LAYER_ID = 'water-depth-fill'
 export const TERRAIN_TILE_URL = '/api/tiles/{z}/{x}/{y}.png'
 export const TERRAIN_SOURCE_ID = 'terrain-dem-source'
 export const TERRAIN_HILLSHADE_SOURCE_ID = 'terrain-hillshade-source'
+export const TERRAIN_HILLSHADE_LAYER_ID = 'terrain-hillshade'
 export const TERRAIN_MIN_ZOOM = 10
 export const TERRAIN_MAX_ZOOM = 13
 export const TERRAIN_EXAGGERATION = 1.0
