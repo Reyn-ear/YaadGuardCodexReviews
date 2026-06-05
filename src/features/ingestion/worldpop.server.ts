@@ -119,9 +119,21 @@ async function upsertWorldPopRecord(
         },
       })
   } catch (error) {
+    if (!isMissingWorldPopPayloadsTableError(error)) {
+      throw error
+    }
+
     throw new Error(
       'Failed to write WorldPop metadata. Confirm D1 migrations have created worldpop_country_payloads.',
       { cause: error },
     )
   }
+}
+
+function isMissingWorldPopPayloadsTableError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  return error.message.includes('no such table: worldpop_country_payloads')
 }
