@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useEffectEvent, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import {
   CloudLightning,
   LoaderCircle,
@@ -11,8 +11,15 @@ import {
   X,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
+import type { FeatureCollection, Polygon } from 'geojson'
+import { Layer, Map, NavigationControl, Source } from 'react-map-gl/maplibre'
+import type {
+  FillLayer,
+  LineLayer,
+  MapLayerMouseEvent,
+  MapRef,
+} from 'react-map-gl/maplibre'
 import maplibregl from 'maplibre-gl'
-import type { MapLayerMouseEvent } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import {
   DEFAULT_MAP_CENTER,
@@ -78,16 +85,71 @@ type MapMode = 'map' | 'terrain'
 const REGION_INSIGHTS_STALE_TIME_MS = 10 * 60 * 1000
 const REGION_INSIGHTS_GC_TIME_MS = 30 * 60 * 1000
 
-type MapSource = NonNullable<ReturnType<maplibregl.Map['getSource']>>
-type GeoJSONDataSource = MapSource & {
-  type: 'geojson'
-  setData: (data: ReturnType<typeof createGridFeatureCollection>) => void
+const GRID_FILL_LAYER: FillLayer = {
+  id: GRID_FILL_LAYER_ID,
+  type: 'fill',
+  source: GRID_SOURCE_ID,
+  paint: {
+    'fill-color': '#38bdf8',
+    'fill-opacity': [
+      'case',
+      ['boolean', ['feature-state', 'active'], false],
+      0.4,
+      ['boolean', ['feature-state', 'hover'], false],
+      0.15,
+      0,
+    ],
+  },
 }
 
-function isGeoJSONSource(
-  source: ReturnType<maplibregl.Map['getSource']>,
-): source is GeoJSONDataSource {
-  return source?.type === 'geojson' && 'setData' in source
+const GRID_OUTLINE_LAYER: LineLayer = {
+  id: GRID_OUTLINE_LAYER_ID,
+  type: 'line',
+  source: GRID_SOURCE_ID,
+  paint: {
+    'line-color': '#38bdf8',
+    'line-width': [
+      'case',
+      ['boolean', ['feature-state', 'active'], false],
+      2,
+      1,
+    ],
+    'line-opacity': [
+      'case',
+      ['boolean', ['feature-state', 'active'], false],
+      1,
+      0.15,
+    ],
+  },
+}
+
+const WATER_FILL_LAYER: FillLayer = {
+  id: WATER_FILL_LAYER_ID,
+  type: 'fill',
+  source: WATER_SOURCE_ID,
+  paint: {
+    'fill-color': [
+      'interpolate',
+      ['linear'],
+      ['get', 'depth'],
+      0,
+      'rgba(191, 219, 254, 0.3)',
+      0.05,
+      'rgba(96, 165, 250, 0.45)',
+      0.1,
+      'rgba(37, 99, 235, 0.55)',
+      0.25,
+      'rgba(30, 64, 175, 0.65)',
+      0.5,
+      'rgba(30, 27, 75, 0.75)',
+    ],
+    'fill-opacity': 1,
+  },
+}
+
+const EMPTY_FEATURE_COLLECTION: FeatureCollection<Polygon> = {
+  type: 'FeatureCollection',
+  features: [],
 }
 
 function getLandslideRiskSummary(metrics: RegionInsightResponse['metrics']) {
@@ -991,199 +1053,145 @@ function MapCanvas({
   mapMode: MapMode
   onTerrainUnavailable: () => void
 }) {
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  const mapRef = useRef<maplibregl.Map | null>(null)
+  const reactMapRef = useRef<MapRef | null>(null)
   const hoveredFeatureIdRef = useRef<number | null>(null)
   const activeFeatureIdRef = useRef<number | null>(null)
   const isReadyRef = useRef(false)
-  const latestGridCenterRef = useRef(gridCenter)
   const handleCellSelect = useEffectEvent(onCellSelect)
   const handleTerrainUnavailable = useEffectEvent(onTerrainUnavailable)
+  const gridData = useMemo(
+    () => createGridFeatureCollection({ center: gridCenter }),
+    [gridCenter],
+  )
+  const waterData = useMemo<FeatureCollection<Polygon>>(() => {
+    if (!waterDepths || !selectedCellBounds) {
+      return EMPTY_FEATURE_COLLECTION
+    }
 
-  latestGridCenterRef.current = gridCenter
+    return {
+      type: 'FeatureCollection',
+      features: buildWaterDepthFeatures({
+        bounds: selectedCellBounds,
+        waterDepths,
+      }),
+    }
+  }, [waterDepths, selectedCellBounds])
 
-  useEffect(() => {
-    if (!containerRef.current || mapRef.current) {
+  const getMap = () => reactMapRef.current?.getMap()
+
+  const clearHoverState = () => {
+    const map = getMap()
+    if (!map || hoveredFeatureIdRef.current === null) {
       return
     }
 
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: MAP_STYLE_URL,
-      center: DEFAULT_MAP_CENTER,
-      zoom: DEFAULT_MAP_ZOOM,
-    })
-
-    map.addControl(
-      new maplibregl.NavigationControl({ showCompass: false }),
-      'bottom-right',
+    map.setFeatureState(
+      { source: GRID_SOURCE_ID, id: hoveredFeatureIdRef.current },
+      { hover: false },
     )
+    hoveredFeatureIdRef.current = null
+  }
 
-    const setGridData = (center: LngLatTuple) => {
-      const source = map.getSource(GRID_SOURCE_ID)
-      const data = createGridFeatureCollection({ center })
-
-      if (isGeoJSONSource(source)) {
-        source.setData(data)
-        return
-      }
-
-      map.addSource(GRID_SOURCE_ID, {
-        type: 'geojson',
-        data,
-      })
+  const clearActiveState = () => {
+    const map = getMap()
+    if (!map || activeFeatureIdRef.current === null) {
+      return
     }
 
-    const clearHoverState = () => {
-      if (hoveredFeatureIdRef.current !== null) {
-        map.setFeatureState(
-          { source: GRID_SOURCE_ID, id: hoveredFeatureIdRef.current },
-          { hover: false },
-        )
-      }
+    map.setFeatureState(
+      { source: GRID_SOURCE_ID, id: activeFeatureIdRef.current },
+      { active: false },
+    )
+    activeFeatureIdRef.current = null
+  }
 
-      hoveredFeatureIdRef.current = null
+  const handleMapLoad = () => {
+    if (!getMap()) {
+      return
     }
 
-    const clearActiveState = () => {
-      if (activeFeatureIdRef.current !== null) {
-        map.setFeatureState(
-          { source: GRID_SOURCE_ID, id: activeFeatureIdRef.current },
-          { active: false },
-        )
-      }
+    isReadyRef.current = true
+  }
 
-      activeFeatureIdRef.current = null
+  const handleMouseMove = (event: MapLayerMouseEvent) => {
+    const map = getMap()
+    if (!map || !isReadyRef.current) {
+      return
     }
 
-    const handleMouseMove = (event: MapLayerMouseEvent) => {
-      const feature = event.features?.[0]
-      if (!feature || feature.id === undefined) {
-        return
-      }
-
-      map.getCanvas().style.cursor = 'crosshair'
-      clearHoverState()
-      hoveredFeatureIdRef.current = Number(feature.id)
-      map.setFeatureState(
-        { source: GRID_SOURCE_ID, id: hoveredFeatureIdRef.current },
-        { hover: true },
-      )
-    }
-
-    const handleMouseLeave = () => {
+    const feature = event.features?.[0]
+    if (!feature || feature.id === undefined) {
       map.getCanvas().style.cursor = ''
       clearHoverState()
+      return
     }
 
-    const handleClick = (event: MapLayerMouseEvent) => {
-      const feature = event.features?.[0]
+    map.getCanvas().style.cursor = 'crosshair'
+    clearHoverState()
+    hoveredFeatureIdRef.current = Number(feature.id)
+    map.setFeatureState(
+      { source: GRID_SOURCE_ID, id: hoveredFeatureIdRef.current },
+      { hover: true },
+    )
+  }
 
-      if (
-        !feature ||
-        feature.id === undefined ||
-        feature.geometry.type !== 'Polygon'
-      ) {
-        return
-      }
-
-      const properties = feature.properties
-
-      clearActiveState()
-      activeFeatureIdRef.current = Number(feature.id)
-      map.setFeatureState(
-        { source: GRID_SOURCE_ID, id: activeFeatureIdRef.current },
-        { active: true },
-      )
-
-      handleCellSelect({
-        type: 'Feature',
-        id: Number(feature.id),
-        properties: {
-          cellId: String(properties.cellId ?? properties.cellKey ?? 'Unknown'),
-          cellKey: String(properties.cellKey ?? 'Unknown'),
-          cellLabel: String(properties.cellLabel ?? 'Unknown'),
-          centerLng: Number(properties.centerLng ?? DEFAULT_MAP_CENTER[0]),
-          centerLat: Number(properties.centerLat ?? DEFAULT_MAP_CENTER[1]),
-          latIndex: Number(properties.latIndex ?? 0),
-          lngIndex: Number(properties.lngIndex ?? 0),
-        },
-        geometry: feature.geometry,
-      })
+  const handleMouseLeave = () => {
+    const map = getMap()
+    if (!map) {
+      return
     }
 
-    map.on('load', () => {
-      setGridData(latestGridCenterRef.current)
+    map.getCanvas().style.cursor = ''
+    clearHoverState()
+  }
 
-      map.addLayer({
-        id: GRID_FILL_LAYER_ID,
-        type: 'fill',
-        source: GRID_SOURCE_ID,
-        paint: {
-          'fill-color': '#38bdf8',
-          'fill-opacity': [
-            'case',
-            ['boolean', ['feature-state', 'active'], false],
-            0.4,
-            ['boolean', ['feature-state', 'hover'], false],
-            0.15,
-            0,
-          ],
-        },
-      })
+  const handleClick = (event: MapLayerMouseEvent) => {
+    const map = getMap()
+    const feature = event.features?.[0]
 
-      map.addLayer({
-        id: GRID_OUTLINE_LAYER_ID,
-        type: 'line',
-        source: GRID_SOURCE_ID,
-        paint: {
-          'line-color': '#38bdf8',
-          'line-width': [
-            'case',
-            ['boolean', ['feature-state', 'active'], false],
-            2,
-            1,
-          ],
-          'line-opacity': [
-            'case',
-            ['boolean', ['feature-state', 'active'], false],
-            1,
-            0.15,
-          ],
-        },
-      })
+    if (
+      !map ||
+      !isReadyRef.current ||
+      !feature ||
+      feature.id === undefined ||
+      feature.geometry.type !== 'Polygon'
+    ) {
+      return
+    }
 
-      map.on('mousemove', GRID_FILL_LAYER_ID, handleMouseMove)
-      map.on('mouseleave', GRID_FILL_LAYER_ID, handleMouseLeave)
-      map.on('click', GRID_FILL_LAYER_ID, handleClick)
-      isReadyRef.current = true
+    const properties = feature.properties
+
+    clearActiveState()
+    activeFeatureIdRef.current = Number(feature.id)
+    map.setFeatureState(
+      { source: GRID_SOURCE_ID, id: activeFeatureIdRef.current },
+      { active: true },
+    )
+
+    handleCellSelect({
+      type: 'Feature',
+      id: Number(feature.id),
+      properties: {
+        cellId: String(properties.cellId ?? properties.cellKey ?? 'Unknown'),
+        cellKey: String(properties.cellKey ?? 'Unknown'),
+        cellLabel: String(properties.cellLabel ?? 'Unknown'),
+        centerLng: Number(properties.centerLng ?? DEFAULT_MAP_CENTER[0]),
+        centerLat: Number(properties.centerLat ?? DEFAULT_MAP_CENTER[1]),
+        latIndex: Number(properties.latIndex ?? 0),
+        lngIndex: Number(properties.lngIndex ?? 0),
+      },
+      geometry: feature.geometry,
     })
+  }
 
-    mapRef.current = map
-
+  useEffect(() => {
     return () => {
-      map.remove()
-      mapRef.current = null
       isReadyRef.current = false
     }
   }, [])
 
   useEffect(() => {
-    const map = mapRef.current
-    if (!map || !isReadyRef.current) {
-      return
-    }
-
-    const source = map.getSource(GRID_SOURCE_ID)
-    if (!isGeoJSONSource(source)) {
-      return
-    }
-
-    source.setData(createGridFeatureCollection({ center: gridCenter }))
-  }, [gridCenter])
-
-  useEffect(() => {
-    const map = mapRef.current
+    const map = getMap()
     if (!map || !isReadyRef.current || !focusTarget) {
       return
     }
@@ -1207,7 +1215,7 @@ function MapCanvas({
   }, [focusTarget])
 
   useEffect(() => {
-    const map = mapRef.current
+    const map = getMap()
     if (!map || !isReadyRef.current) {
       return
     }
@@ -1230,7 +1238,7 @@ function MapCanvas({
   }, [clearSelectionVersion])
 
   useEffect(() => {
-    const map = mapRef.current
+    const map = getMap()
     if (!map || !isReadyRef.current) {
       return
     }
@@ -1335,69 +1343,32 @@ function MapCanvas({
     }
   }, [mapMode])
 
-  // Water depth overlay
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map || !isReadyRef.current) {
-      return
-    }
-
-    // Remove existing water layer and source
-    if (map.getLayer(WATER_FILL_LAYER_ID)) {
-      map.removeLayer(WATER_FILL_LAYER_ID)
-    }
-    if (map.getSource(WATER_SOURCE_ID)) {
-      map.removeSource(WATER_SOURCE_ID)
-    }
-
-    // Exit if no depths or no bounds
-    if (!waterDepths || !selectedCellBounds) {
-      return
-    }
-
-    const features = buildWaterDepthFeatures({
-      bounds: selectedCellBounds,
-      waterDepths,
-    })
-
-    if (features.length === 0) return
-
-    map.addSource(WATER_SOURCE_ID, {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features },
-    })
-
-    map.addLayer({
-      id: WATER_FILL_LAYER_ID,
-      type: 'fill',
-      source: WATER_SOURCE_ID,
-      paint: {
-        'fill-color': [
-          'interpolate',
-          ['linear'],
-          ['get', 'depth'],
-          0,
-          'rgba(191, 219, 254, 0.3)',
-          0.05,
-          'rgba(96, 165, 250, 0.45)',
-          0.1,
-          'rgba(37, 99, 235, 0.55)',
-          0.25,
-          'rgba(30, 64, 175, 0.65)',
-          0.5,
-          'rgba(30, 27, 75, 0.75)',
-        ],
-        'fill-opacity': 1,
-      },
-    })
-  }, [waterDepths, selectedCellBounds])
-
   return (
-    <div
-      ref={containerRef}
-      className="map-page__map"
-      aria-label="Interactive map"
-      style={{ width: '100%', height: '100%', display: 'block' }}
-    />
+    <div className="map-page__map" aria-label="Interactive map">
+      <Map
+        ref={reactMapRef}
+        initialViewState={{
+          longitude: DEFAULT_MAP_CENTER[0],
+          latitude: DEFAULT_MAP_CENTER[1],
+          zoom: DEFAULT_MAP_ZOOM,
+        }}
+        mapStyle={MAP_STYLE_URL}
+        onLoad={handleMapLoad}
+        interactiveLayerIds={[GRID_FILL_LAYER_ID]}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+        onClick={handleClick}
+        style={{ width: '100%', height: '100%', display: 'block' }}
+      >
+        <NavigationControl position="bottom-right" showCompass={false} />
+        <Source id={GRID_SOURCE_ID} type="geojson" data={gridData}>
+          <Layer {...GRID_FILL_LAYER} />
+          <Layer {...GRID_OUTLINE_LAYER} />
+        </Source>
+        <Source id={WATER_SOURCE_ID} type="geojson" data={waterData}>
+          <Layer {...WATER_FILL_LAYER} />
+        </Source>
+      </Map>
+    </div>
   )
 }

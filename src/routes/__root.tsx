@@ -30,10 +30,6 @@ export const Route = createRootRoute({
         rel: 'stylesheet',
         href: appCss,
       },
-      {
-        rel: 'stylesheet',
-        href: 'https://unpkg.com/maplibre-gl@5.20.1/dist/maplibre-gl.css',
-      },
     ],
   }),
   notFoundComponent: NotFoundPage,
