@@ -9,6 +9,21 @@ npm install
 npm run dev
 ```
 
+## Cloudflare Remote Data In Dev
+
+Local dev uses simulated D1 and R2 by default. To run local code against the real
+Cloudflare D1 database and R2 bucket, authenticate Wrangler and use the
+remote-data config:
+
+```bash
+npx wrangler login
+npm run dev:remote-data
+```
+
+This uses remote bindings for `DB` and `YAAD_GUARD_BUCKET` from
+`wrangler.remote-data.jsonc`. It does not bind the ingestion queue, workflow, or
+geospatial container.
+
 # Building For Production
 
 To build this application for production:
