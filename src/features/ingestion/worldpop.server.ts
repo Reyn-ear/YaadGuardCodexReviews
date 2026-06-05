@@ -1,36 +1,10 @@
+import { sql } from 'drizzle-orm'
+import { createDb } from '../../../db/client'
+import { worldpopCountryPayloads } from '../../../db/schema'
+import type { WorldPopRecord } from '../../../db/schema'
 import { CARIBBEAN_COUNTRY_BOUNDARIES } from '../map/caribbeanCountryBoundaries'
 
 export const WORLDPOP_DATASET_ALIAS = 'G2_CN_POP_2024_100m'
-
-interface WorldPopRecord {
-  id?: string
-  title?: string
-  desc?: string
-  doi?: string
-  date?: string
-  popyear?: string
-  citation?: string
-  data_file?: string
-  archive?: string
-  public?: string
-  source?: string
-  data_format?: string
-  author_email?: string
-  author_name?: string
-  maintainer_name?: string
-  maintainer_email?: string
-  project?: string
-  category?: string
-  gtype?: string
-  continent?: string
-  country?: string
-  iso3?: string
-  files?: string[]
-  url_img?: string
-  organisation?: string
-  license?: string
-  url_summary?: string
-}
 
 interface WorldPopApiResponse {
   data?: WorldPopRecord[]
@@ -86,7 +60,7 @@ async function fetchWorldPopRecord(iso3: string) {
     )
   }
 
-  const payload = (await response.json()) as WorldPopApiResponse
+  const payload: WorldPopApiResponse = await response.json()
   const records = Array.isArray(payload.data) ? payload.data : []
   const usable = records.find(
     (record) =>
@@ -107,47 +81,47 @@ async function upsertWorldPopRecord(
 ) {
   const worldpopId = Number(record.id)
   const populationYear = Number(record.popyear)
+  const iso3 = record.iso3
 
-  if (!Number.isInteger(worldpopId) || !Number.isInteger(populationYear)) {
+  if (
+    !Number.isInteger(worldpopId) ||
+    !Number.isInteger(populationYear) ||
+    !iso3
+  ) {
     throw new Error(`WorldPop record for ${record.iso3} has invalid ids`)
   }
 
-  await env.DB?.prepare(
-    `
-      INSERT INTO worldpop_country_payloads (
-        worldpop_id,
-        dataset_alias,
+  try {
+    await createDb(env.DB)
+      .insert(worldpopCountryPayloads)
+      .values({
+        worldpopId,
+        datasetAlias: WORLDPOP_DATASET_ALIAS,
         iso3,
-        country_name,
-        continent,
-        population_year,
-        source_date,
-        payload,
-        synced_at,
-        updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      ON CONFLICT(worldpop_id) DO UPDATE SET
-        dataset_alias = excluded.dataset_alias,
-        iso3 = excluded.iso3,
-        country_name = excluded.country_name,
-        continent = excluded.continent,
-        population_year = excluded.population_year,
-        source_date = excluded.source_date,
-        payload = excluded.payload,
-        synced_at = CURRENT_TIMESTAMP,
-        updated_at = CURRENT_TIMESTAMP
-    `,
-  )
-    .bind(
-      worldpopId,
-      WORLDPOP_DATASET_ALIAS,
-      record.iso3,
-      record.country ?? countryName,
-      record.continent ?? null,
-      populationYear,
-      record.date ?? null,
-      JSON.stringify(record),
+        countryName: record.country ?? countryName,
+        continent: record.continent ?? null,
+        populationYear,
+        sourceDate: record.date ?? null,
+        payload: record,
+      })
+      .onConflictDoUpdate({
+        target: worldpopCountryPayloads.worldpopId,
+        set: {
+          datasetAlias: sql`excluded.dataset_alias`,
+          iso3: sql`excluded.iso3`,
+          countryName: sql`excluded.country_name`,
+          continent: sql`excluded.continent`,
+          populationYear: sql`excluded.population_year`,
+          sourceDate: sql`excluded.source_date`,
+          payload: sql`excluded.payload`,
+          syncedAt: sql`CURRENT_TIMESTAMP`,
+          updatedAt: sql`CURRENT_TIMESTAMP`,
+        },
+      })
+  } catch (error) {
+    throw new Error(
+      'Failed to write WorldPop metadata. Confirm D1 migrations have created worldpop_country_payloads.',
+      { cause: error },
     )
-    .run()
+  }
 }

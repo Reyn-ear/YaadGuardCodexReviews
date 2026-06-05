@@ -26,6 +26,7 @@ import type { BoundsTuple, HistoricalAnalog, RegionInsightInput } from './types'
 const STORM_STATS_RADIUS_KM = 250
 const STORM_ANALOG_RADIUS_KM = 450
 const MAX_SEARCH_ANALYSIS_AREA_SQ_KM = 400
+const MISSING_D1_BINDING = 'Missing Cloudflare D1 binding: DB'
 const DEFAULT_ANALYSIS_BOUNDS: BoundsTuple = [
   [-GRID_LNG_STEP / 2, -GRID_LAT_STEP / 2],
   [GRID_LNG_STEP / 2, GRID_LAT_STEP / 2],
@@ -466,8 +467,12 @@ async function loadWorldPopMetadata(iso3: string) {
       where: eq(schema.worldpopCountryPayloads.iso3, iso3),
       orderBy: (table, { desc }) => [desc(table.populationYear)],
     })
-  } catch {
-    return null
+  } catch (error) {
+    if (error instanceof Error && error.message.includes(MISSING_D1_BINDING)) {
+      return null
+    }
+
+    throw error
   }
 }
 
@@ -629,8 +634,12 @@ async function loadDatabaseTerrainSummary(
         landCoveragePct: row.landCoveragePct,
       },
     }
-  } catch {
-    return undefined
+  } catch (error) {
+    if (error instanceof Error && error.message.includes(MISSING_D1_BINDING)) {
+      return undefined
+    }
+
+    throw error
   }
 }
 
