@@ -19,7 +19,6 @@ import type {
   MapLayerMouseEvent,
   MapRef,
 } from 'react-map-gl/maplibre'
-import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import {
   DEFAULT_MAP_CENTER,
@@ -1301,7 +1300,7 @@ function MapCanvas({
           baseShift: TERRAIN_BASE_SHIFT,
           minzoom: TERRAIN_MIN_ZOOM,
           maxzoom: TERRAIN_MAX_ZOOM,
-        } as maplibregl.SourceSpecification)
+        })
       }
 
       if (!map.getLayer(TERRAIN_HILLSHADE_LAYER_ID)) {

@@ -19,7 +19,7 @@ export default defineEventHandler(async (event) => {
   const body = requestSchema.parse(await readBody(event).catch(() => ({})))
   const sourceIds = resolveSourceIds(body.sourceIds)
   const runId = body.runId ?? createIngestionRunId()
-  const cloudflareEnv = env as CloudflareBindings
+  const cloudflareEnv = env
 
   if (cloudflareEnv.DATASET_INGESTION) {
     const instance = await cloudflareEnv.DATASET_INGESTION.create({

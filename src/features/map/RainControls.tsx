@@ -57,9 +57,7 @@ export function RainControls({
           max={MAX_MM}
           step={1}
           value={mmPerHr}
-          onChange={(e) =>
-            onChange(Number((e.target as HTMLInputElement).value))
-          }
+          onChange={(e) => onChange(Number(e.target.value))}
           className="rain-controls__slider"
           aria-label="Rainfall intensity"
         />

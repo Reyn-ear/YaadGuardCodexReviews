@@ -21,7 +21,7 @@ type JobStatus =
   | 'completed'
   | 'failed'
 
-export const SOURCE_CATALOG: Record<string, IngestionSource> = {
+export const SOURCE_CATALOG: Partial<Record<string, IngestionSource>> = {
   'T-01': {
     id: 'T-01',
     name: 'Copernicus DEM GLO-30',
@@ -102,6 +102,10 @@ export async function enqueueIngestionJobs(
 
   for (const sourceId of ids) {
     const source = SOURCE_CATALOG[sourceId]
+    if (!source) {
+      throw new Error(`Unknown ingestion source id: ${sourceId}`)
+    }
+
     const action = source.downloadUrl ? 'download-source' : 'process-source'
     await upsertJob(env, {
       runId,

@@ -1,10 +1,7 @@
 import { Container } from '@cloudflare/containers'
 import handler from '@tanstack/react-start/server-entry'
-import {
-  WorkflowEntrypoint,
-  type WorkflowEvent,
-  type WorkflowStep,
-} from 'cloudflare:workers'
+import { WorkflowEntrypoint } from 'cloudflare:workers'
+import type { WorkflowEvent, WorkflowStep } from 'cloudflare:workers'
 import {
   createIngestionRunId,
   enqueueIngestionJobs,
