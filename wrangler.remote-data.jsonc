@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "yaad-guard-remote-data",
+  "compatibility_date": "2026-05-07",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "src/server.ts",
+  "vars": {
+    "ACTIVE_MANIFEST_KEY": "manifests/active.json",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "yaad-guard",
+      "database_id": "d47fc65a-8a4c-4a52-b3fd-5b731755db6a",
+      "migrations_dir": "db/migrations",
+      "remote": true,
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "YAAD_GUARD_BUCKET",
+      "bucket_name": "yaad-guard-artifacts",
+      "remote": true,
+    },
+  ],
+  "dev": {
+    "enable_containers": false,
+  },
+}

@@ -7,6 +7,7 @@
   },
   "scripts": {
     "dev": "vite dev --port 3000",
+    "dev:remote-data": "CLOUDFLARE_REMOTE_DATA=1 vite dev --port 3000",
     "build": "vite build",
     "start": "vite preview",
     "preview": "vite preview",
@@ -25,6 +26,8 @@
     "@cloudflare/containers": "^0.3.3",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "latest",
+    "@tanstack/react-pacer": "^0.22.1",
+    "@tanstack/react-query": "^5.101.0",
     "@tanstack/react-router": "latest",
     "@tanstack/react-router-devtools": "latest",
     "@tanstack/react-router-ssr-query": "latest",
