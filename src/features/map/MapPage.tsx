@@ -1115,8 +1115,14 @@ function MapCanvas({
 
   const handleMouseMove = (event: MapLayerMouseEvent) => {
     const map = getMap()
+    if (!map || !isReadyRef.current) {
+      return
+    }
+
     const feature = event.features?.[0]
-    if (!map || !isReadyRef.current || !feature || feature.id === undefined) {
+    if (!feature || feature.id === undefined) {
+      map.getCanvas().style.cursor = ''
+      clearHoverState()
       return
     }
 
