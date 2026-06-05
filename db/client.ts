@@ -6,11 +6,18 @@ type D1Client = ReturnType<typeof drizzle<typeof schema>>
 
 let cachedDb: D1Client | null = null
 
+export class D1BindingError extends Error {
+  constructor(bindingName: string) {
+    super(`Missing Cloudflare D1 binding: ${bindingName}`)
+    this.name = 'D1BindingError'
+  }
+}
+
 function resolveD1Binding(database?: D1Database) {
   const binding = database ?? (env as Partial<CloudflareBindings>).DB
 
   if (!binding) {
-    throw new Error('Missing Cloudflare D1 binding: DB')
+    throw new D1BindingError('DB')
   }
 
   return binding

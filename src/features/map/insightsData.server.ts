@@ -1,5 +1,6 @@
 import { and, between, eq } from 'drizzle-orm'
 import { z } from 'zod'
+import { D1BindingError } from '../../../db/client.ts'
 import { CARIBBEAN_COUNTRY_BOUNDARIES } from './caribbeanCountryBoundaries'
 import { GRID_LAT_STEP, GRID_LNG_STEP } from './config'
 import { pointInPolygon } from './geometry'
@@ -26,7 +27,6 @@ import type { BoundsTuple, HistoricalAnalog, RegionInsightInput } from './types'
 const STORM_STATS_RADIUS_KM = 250
 const STORM_ANALOG_RADIUS_KM = 450
 const MAX_SEARCH_ANALYSIS_AREA_SQ_KM = 400
-const MISSING_D1_BINDING = 'Missing Cloudflare D1 binding: DB'
 const DEFAULT_ANALYSIS_BOUNDS: BoundsTuple = [
   [-GRID_LNG_STEP / 2, -GRID_LAT_STEP / 2],
   [GRID_LNG_STEP / 2, GRID_LAT_STEP / 2],
@@ -468,7 +468,7 @@ async function loadWorldPopMetadata(iso3: string) {
       orderBy: (table, { desc }) => [desc(table.populationYear)],
     })
   } catch (error) {
-    if (error instanceof Error && error.message.includes(MISSING_D1_BINDING)) {
+    if (error instanceof D1BindingError) {
       return null
     }
 
@@ -635,7 +635,7 @@ async function loadDatabaseTerrainSummary(
       },
     }
   } catch (error) {
-    if (error instanceof Error && error.message.includes(MISSING_D1_BINDING)) {
+    if (error instanceof D1BindingError) {
       return undefined
     }
 

@@ -41,8 +41,11 @@ vi.mock('node:fs/promises', () => ({
 vi.mock('../../../db/client.ts', async () => {
   const schema = await import('../../../db/schema/index.ts')
 
+  class D1BindingError extends Error {}
+
   return {
     schema,
+    D1BindingError,
     db: {
       query: {
         terrainSummaries: {
