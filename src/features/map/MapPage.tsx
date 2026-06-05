@@ -1,11 +1,11 @@
 import { Link } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import {
   CloudLightning,
   LoaderCircle,
   MapPin,
   MapPinned,
-  Mountain,
   Search,
   Sparkles,
   X,
@@ -23,18 +23,27 @@ import {
   GRID_OUTLINE_LAYER_ID,
   GRID_SOURCE_ID,
   MAP_STYLE_URL,
+  TERRAIN_BASE_SHIFT,
+  TERRAIN_BLUE_FACTOR,
+  TERRAIN_EXAGGERATION,
+  TERRAIN_GREEN_FACTOR,
+  TERRAIN_HILLSHADE_LAYER_ID,
+  TERRAIN_MAX_ZOOM,
+  TERRAIN_MIN_ZOOM,
+  TERRAIN_RED_FACTOR,
+  TERRAIN_SOURCE_ID,
+  TERRAIN_TILE_URL,
   WATER_FILL_LAYER_ID,
   WATER_SOURCE_ID,
 } from './config'
 import { createGridFeatureCollection } from './grid'
 import { getRegionInsights } from './insights'
-import { searchPlaces } from './search'
-import { useDebounce } from '../../hooks/useDebounce'
-import { computeWaterDepths } from './rain-sim'
-import { fetchSubGridElevations } from './elevation'
 import { RainControls } from './RainControls'
 import './rain-controls.css'
 import { InfoCard } from './InfoCard'
+import { usePlaceSearch } from './usePlaceSearch'
+import { useRainSimulation } from './useRainSimulation'
+import { buildWaterDepthFeatures } from './rain-sim'
 import type {
   BoundsTuple,
   GridCellFeature,
@@ -43,7 +52,6 @@ import type {
   RegionInsightResponse,
   SearchResult,
 } from './types'
-import { TerrainPopup } from './TerrainPopup'
 
 export type PanelState =
   | { status: 'empty' }
@@ -62,11 +70,13 @@ interface FocusTarget {
 }
 
 interface TerrainView {
-  cellId: string
-  label: string
-  center: LngLatTuple
   bounds: BoundsTuple
 }
+
+type MapMode = 'map' | 'terrain'
+
+const REGION_INSIGHTS_STALE_TIME_MS = 10 * 60 * 1000
+const REGION_INSIGHTS_GC_TIME_MS = 30 * 60 * 1000
 
 type MapSource = NonNullable<ReturnType<maplibregl.Map['getSource']>>
 type GeoJSONDataSource = MapSource & {
@@ -126,166 +136,53 @@ function getLandslideRiskSummary(metrics: RegionInsightResponse['metrics']) {
 }
 
 export default function MapPage() {
-  const [panelState, setPanelState] = useState<PanelState>({ status: 'empty' })
   const [gridCenter, setGridCenter] = useState<LngLatTuple>(DEFAULT_MAP_CENTER)
   const [focusTarget, setFocusTarget] = useState<FocusTarget | null>(null)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchMessage, setSearchMessage] = useState<string | null>(null)
-  const [isSearching, setIsSearching] = useState(false)
   const [clearSelectionVersion, setClearSelectionVersion] = useState(0)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-  const [suggestions, setSuggestions] = useState<SearchResult[]>([])
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false)
-  const [isTyping, setIsTyping] = useState(false)
-  const [isFocused, setIsFocused] = useState(false)
-  const [placeholderIndex, setPlaceholderIndex] = useState(0)
-  const debouncedQuery = useDebounce(searchQuery, 600)
-  const isWaiting =
-    !isTyping && searchQuery.trim() !== '' && searchQuery !== debouncedQuery
   const [terrainView, setTerrainView] = useState<TerrainView | null>(null)
-  const [showTerrainPopup, setShowTerrainPopup] = useState(false)
-  const typingTimeoutRef = useRef<number | null>(null)
-  const analysisRequestIdRef = useRef(0)
-
-  // Rain simulation state
-  const [subGridElevations, setSubGridElevations] = useState<number[] | null>(
-    null,
-  )
-  const [elevationLoading, setElevationLoading] = useState(false)
-  const [mmPerHr, setMmPerHr] = useState(0)
-  const [waterDepths, setWaterDepths] = useState<number[]>([])
-  const selectedCellBoundsRef = useRef<BoundsTuple | null>(null)
-
-  const placeholders = [
-    'Search regions...',
-    'Try "Kingston"...',
-    'Try "Montego Bay"...',
-    'Find locations...',
-  ]
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!isFocused && !searchQuery) {
-        setPlaceholderIndex((prev) => (prev + 1) % placeholders.length)
-      }
-    }, 3000)
-    return () => clearInterval(interval)
-  }, [isFocused, searchQuery, placeholders.length])
-
-  useEffect(() => {
-    return () => {
-      if (typingTimeoutRef.current !== null) {
-        window.clearTimeout(typingTimeoutRef.current)
-      }
-    }
-  }, [])
-
-  const handleSearchChange = (value: string) => {
-    setSearchQuery(value)
-    setIsTyping(true)
-
-    if (typingTimeoutRef.current !== null) {
-      window.clearTimeout(typingTimeoutRef.current)
-    }
-
-    typingTimeoutRef.current = window.setTimeout(() => {
-      setIsTyping(false)
-    }, 300)
-  }
-
-  useEffect(() => {
-    const trimmedQuery = debouncedQuery.trim()
-    if (!trimmedQuery) {
-      setSuggestions([])
-      setIsDropdownOpen(false)
-      return
-    }
-
-    let isMounted = true
-    setIsSearching(true)
-
-    searchPlaces(trimmedQuery)
-      .then((results) => {
-        if (!isMounted) return
-        setSuggestions(results)
-        setIsDropdownOpen(results.length > 0)
-        if (results.length > 0) {
-          setSearchMessage(null)
-        }
-      })
-      .catch(() => {
-        if (!isMounted) return
-        setSuggestions([])
-        setIsDropdownOpen(false)
-      })
-      .finally(() => {
-        if (!isMounted) return
-        setIsSearching(false)
-      })
-
-    return () => {
-      isMounted = false
-    }
-  }, [debouncedQuery])
-
-  const queueAnalysis = useEffectEvent(async (payload: RegionInsightInput) => {
-    const requestId = analysisRequestIdRef.current + 1
-    analysisRequestIdRef.current = requestId
-
-    setPanelState({ status: 'loading', label: payload.label })
-
-    try {
-      const insight = await getRegionInsights({ data: payload })
-
-      if (requestId !== analysisRequestIdRef.current) {
-        return
+  const [mapMode, setMapMode] = useState<MapMode>('map')
+  const [selectedAnalysis, setSelectedAnalysis] =
+    useState<RegionInsightInput | null>(null)
+  const [panelOverride, setPanelOverride] = useState<PanelState | null>(null)
+  const [terrainStatusMessage, setTerrainStatusMessage] = useState<
+    string | null
+  >(null)
+  const selectedCellBounds = terrainView?.bounds ?? null
+  const rainSimulation = useRainSimulation(selectedCellBounds)
+  const regionInsightsQuery = useQuery({
+    queryKey: ['region-insights', selectedAnalysis],
+    queryFn: async () => {
+      if (!selectedAnalysis) {
+        throw new Error('No region selected for insights.')
       }
 
-      setPanelState({
-        status: 'ready',
-        label: payload.label,
-        kind: payload.kind,
-        insight,
-      })
-    } catch {
-      if (requestId !== analysisRequestIdRef.current) {
-        return
-      }
-
-      setPanelState({
-        status: 'error',
-        title: 'Region insight unavailable',
-        message:
-          'Hazard signals could not be calculated for this location. Check the server data sources and try again.',
-      })
-    }
+      return getRegionInsights({ data: selectedAnalysis })
+    },
+    enabled: selectedAnalysis !== null,
+    staleTime: REGION_INSIGHTS_STALE_TIME_MS,
+    gcTime: REGION_INSIGHTS_GC_TIME_MS,
+    retry: false,
   })
-
-  const handleCellSelect = useEffectEvent((feature: GridCellFeature) => {
-    setSearchMessage(null)
-    setShowTerrainPopup(false)
-    const centerLng = feature.properties.centerLng
-    const centerLat = feature.properties.centerLat
-    const halfLatStep = GRID_LAT_STEP / 2
-    const halfLngStep = GRID_LNG_STEP / 2
-    const bounds: BoundsTuple = [
-      [centerLng - halfLngStep, centerLat - halfLatStep],
-      [centerLng + halfLngStep, centerLat + halfLatStep],
-    ]
-    setTerrainView({
-      cellId: feature.properties.cellId,
-      label: feature.properties.cellLabel,
-      center: [centerLng, centerLat],
-      bounds,
-    })
-    queueAnalysis({
-      kind: 'cell',
-      label: feature.properties.cellLabel,
-      center: [centerLng, centerLat],
-      bounds,
-      gridCellId: feature.properties.cellId,
-    })
-  })
+  const panelState: PanelState =
+    panelOverride ??
+    (selectedAnalysis === null
+      ? { status: 'empty' }
+      : regionInsightsQuery.isError
+        ? {
+            status: 'error',
+            title: 'Region insight unavailable',
+            message:
+              'Hazard signals could not be calculated for this location. Check the server data sources and try again.',
+          }
+        : regionInsightsQuery.data
+          ? {
+              status: 'ready',
+              label: selectedAnalysis.label,
+              kind: selectedAnalysis.kind,
+              insight: regionInsightsQuery.data,
+            }
+          : { status: 'loading', label: selectedAnalysis.label })
 
   const handleResultSelect = useEffectEvent((result: SearchResult) => {
     setGridCenter(result.center)
@@ -294,13 +191,9 @@ export default function MapPage() {
       result: result,
     })
     setTerrainView(null)
-    setShowTerrainPopup(false)
-    setSearchQuery('')
-    setSuggestions([])
-    setIsDropdownOpen(false)
-    setSearchMessage(null)
     setClearSelectionVersion((version) => version + 1)
-    queueAnalysis({
+    setPanelOverride(null)
+    setSelectedAnalysis({
       kind: 'search',
       label: result.label,
       center: result.center,
@@ -309,98 +202,51 @@ export default function MapPage() {
     })
   })
 
-  const handleSearchSubmit = useEffectEvent(async () => {
-    const topSuggestion = suggestions.at(0)
-    if (topSuggestion) {
-      handleResultSelect(topSuggestion)
-      return
-    }
-
-    const trimmedQuery = searchQuery.trim()
-    if (!trimmedQuery) {
-      setSearchMessage('Enter a place or landmark to reposition the map.')
-      return
-    }
-
-    setIsSearching(true)
-    setSearchMessage(null)
-
-    try {
-      const results = await searchPlaces(trimmedQuery)
-      const selectedResult = results.at(0)
-
-      if (!selectedResult) {
-        setPanelState({
-          status: 'error',
-          title: 'No results found',
-          message: 'Try a broader city, parish, or landmark name.',
-        })
-        setSearchMessage('No results matched that search.')
-        return
-      }
-
-      handleResultSelect(selectedResult)
-    } catch {
-      setPanelState({
+  const placeSearch = usePlaceSearch({
+    onSelect: handleResultSelect,
+    onNoResults: () => {
+      setSelectedAnalysis(null)
+      setPanelOverride({
+        status: 'error',
+        title: 'No results found',
+        message: 'Try a broader city, parish, or landmark name.',
+      })
+    },
+    onSearchError: () => {
+      setSelectedAnalysis(null)
+      setPanelOverride({
         status: 'error',
         title: 'Search unavailable',
         message:
           'The location service could not be reached. Try again in a moment.',
       })
-      setSearchMessage('Search request failed. Please retry.')
-    } finally {
-      setIsSearching(false)
-    }
+    },
+  })
+  const isSearchDropdownOpen = placeSearch.suggestions.length > 0
+
+  const handleCellSelect = useEffectEvent((feature: GridCellFeature) => {
+    placeSearch.clearMessage()
+    const centerLng = feature.properties.centerLng
+    const centerLat = feature.properties.centerLat
+    const halfLatStep = GRID_LAT_STEP / 2
+    const halfLngStep = GRID_LNG_STEP / 2
+    const bounds: BoundsTuple = [
+      [centerLng - halfLngStep, centerLat - halfLatStep],
+      [centerLng + halfLngStep, centerLat + halfLatStep],
+    ]
+    setTerrainView({ bounds })
+    setPanelOverride(null)
+    setSelectedAnalysis({
+      kind: 'cell',
+      label: feature.properties.cellLabel,
+      center: [centerLng, centerLat],
+      bounds,
+      gridCellId: feature.properties.cellId,
+    })
   })
 
   const closeSidebar = useEffectEvent(() => {
-    analysisRequestIdRef.current += 1
     setIsSidebarOpen(false)
-    setShowTerrainPopup(false)
-  })
-
-  // Fetch sub-grid elevations when cell is selected
-  useEffect(() => {
-    if (!terrainView) {
-      setSubGridElevations(null)
-      setWaterDepths([])
-      selectedCellBoundsRef.current = null
-      return
-    }
-
-    let cancelled = false
-    setElevationLoading(true)
-    setSubGridElevations(null)
-    selectedCellBoundsRef.current = terrainView.bounds
-
-    fetchSubGridElevations({
-      data: { bounds: terrainView.bounds, subGridSize: 20 },
-    })
-      .then((result) => {
-        if (cancelled) return
-        if (result.success) {
-          setSubGridElevations(result.elevations)
-          setWaterDepths(computeWaterDepths(result.elevations, mmPerHr))
-        }
-      })
-      .catch((err) => {
-        console.error('[MapPage] Failed to fetch elevations:', err)
-      })
-      .finally(() => {
-        if (!cancelled) setElevationLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [terrainView])
-
-  // Handle rain slider change
-  const handleRainChange = useEffectEvent((newMm: number) => {
-    setMmPerHr(newMm)
-    if (subGridElevations) {
-      setWaterDepths(computeWaterDepths(subGridElevations, newMm))
-    }
   })
 
   return (
@@ -413,13 +259,32 @@ export default function MapPage() {
           focusTarget={focusTarget}
           clearSelectionVersion={clearSelectionVersion}
           onCellSelect={handleCellSelect}
-          waterDepths={waterDepths.length > 0 ? waterDepths : null}
-          selectedCellBounds={selectedCellBoundsRef.current}
+          waterDepths={
+            rainSimulation.waterDepths.length > 0
+              ? rainSimulation.waterDepths
+              : null
+          }
+          selectedCellBounds={selectedCellBounds}
+          mapMode={mapMode}
+          onTerrainUnavailable={() => {
+            setMapMode('map')
+            setTerrainStatusMessage('Terrain unavailable for this area')
+          }}
+        />
+
+        <MapTypeControl
+          mode={mapMode}
+          statusMessage={terrainStatusMessage}
+          onStatusDismiss={() => setTerrainStatusMessage(null)}
+          onModeChange={(mode) => {
+            setTerrainStatusMessage(null)
+            setMapMode(mode)
+          }}
         />
 
         <InfoCard
           panelState={panelState}
-          mmPerHr={mmPerHr}
+          mmPerHr={rainSimulation.mmPerHr}
           onDetailsClick={() => setIsSidebarOpen(true)}
         />
 
@@ -429,11 +294,15 @@ export default function MapPage() {
             initial={false}
             animate={{
               width:
-                isFocused || searchQuery || isDropdownOpen ? '100%' : '280px',
-              borderColor: isFocused
+                placeSearch.isFocused ||
+                placeSearch.query ||
+                isSearchDropdownOpen
+                  ? '100%'
+                  : '280px',
+              borderColor: placeSearch.isFocused
                 ? 'rgba(56, 189, 248, 0.55)'
                 : 'rgba(255, 255, 255, 0.05)',
-              boxShadow: isFocused
+              boxShadow: placeSearch.isFocused
                 ? '0 10px 40px rgba(0, 0, 0, 0.34), 0 0 20px rgba(56, 189, 248, 0.15)'
                 : '0 8px 32px rgba(0, 0, 0, 0.15)',
             }}
@@ -444,7 +313,7 @@ export default function MapPage() {
               className="map-page__search-box"
               onSubmit={(event) => {
                 event.preventDefault()
-                void handleSearchSubmit()
+                void placeSearch.submit()
               }}
             >
               <Search
@@ -453,42 +322,37 @@ export default function MapPage() {
                 size={18}
               />
               <div className="relative flex flex-1 items-center overflow-hidden h-[1.5rem]">
-                <AnimatePresence mode="popLayout">
-                  {!searchQuery && (
-                    <motion.div
-                      key={placeholderIndex}
-                      initial={{ y: 15, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      exit={{ y: -15, opacity: 0 }}
-                      transition={{ duration: 0.3, ease: 'easeOut' }}
-                      className="absolute inset-0 flex items-center pointer-events-none text-[var(--text-secondary)] font-medium text-[0.96rem] whitespace-nowrap overflow-hidden"
-                    >
-                      {placeholders[placeholderIndex]}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                {!placeSearch.query && (
+                  <span className="absolute inset-0 flex items-center pointer-events-none text-[var(--text-secondary)] font-medium text-[0.96rem] whitespace-nowrap overflow-hidden">
+                    {placeSearch.placeholder}
+                  </span>
+                )}
                 <input
                   type="text"
-                  value={searchQuery}
-                  onChange={(event) => handleSearchChange(event.target.value)}
-                  onFocus={() => setIsFocused(true)}
-                  onBlur={() => setIsFocused(false)}
+                  value={placeSearch.query}
+                  onChange={(event) => placeSearch.setQuery(event.target.value)}
+                  onFocus={() => placeSearch.setIsFocused(true)}
+                  onBlur={() => placeSearch.setIsFocused(false)}
                   aria-label="Search locations"
                   autoComplete="off"
                   className="w-full bg-transparent border-none outline-none text-[var(--text-primary)] text-[0.96rem]"
                 />
               </div>
-              <button type="submit" disabled={isSearching}>
+              <button type="submit" disabled={placeSearch.isSearching}>
                 <AnimatePresence mode="wait" initial={false}>
                   <motion.div
-                    key={isSearching || isWaiting ? 'loading' : 'sparkles'}
+                    key={
+                      placeSearch.isSearching || placeSearch.isWaiting
+                        ? 'loading'
+                        : 'sparkles'
+                    }
                     initial={{ opacity: 0, scale: 0.8, rotate: -45 }}
                     animate={{ opacity: 1, scale: 1, rotate: 0 }}
                     exit={{ opacity: 0, scale: 0.8, rotate: 45 }}
                     transition={{ duration: 0.4, ease: 'easeOut' }}
                     className="flex items-center justify-center"
                   >
-                    {isSearching || isWaiting ? (
+                    {placeSearch.isSearching || placeSearch.isWaiting ? (
                       <LoaderCircle
                         aria-hidden="true"
                         size={18}
@@ -504,7 +368,7 @@ export default function MapPage() {
             </form>
 
             <AnimatePresence>
-              {isDropdownOpen && suggestions.length > 0 && (
+              {isSearchDropdownOpen && (
                 <motion.ul
                   layout
                   className="map-page__dropdown"
@@ -529,7 +393,7 @@ export default function MapPage() {
                     },
                   }}
                 >
-                  {suggestions.map((result, idx) => (
+                  {placeSearch.suggestions.map((result, idx) => (
                     <motion.li
                       key={`${result.label}-${idx}`}
                       variants={{
@@ -543,7 +407,7 @@ export default function MapPage() {
                     >
                       <button
                         type="button"
-                        onClick={() => handleResultSelect(result)}
+                        onClick={() => placeSearch.selectResult(result)}
                       >
                         <MapPin size={16} aria-hidden="true" />
                         <span>{result.label}</span>
@@ -555,8 +419,8 @@ export default function MapPage() {
             </AnimatePresence>
           </motion.div>
 
-          {searchMessage && !isDropdownOpen ? (
-            <p className="map-page__search-note">{searchMessage}</p>
+          {placeSearch.message && !isSearchDropdownOpen ? (
+            <p className="map-page__search-note">{placeSearch.message}</p>
           ) : null}
         </div>
 
@@ -580,10 +444,10 @@ export default function MapPage() {
 
           {/* Rain simulation controls */}
           <RainControls
-            mmPerHr={mmPerHr}
-            onChange={handleRainChange}
-            isLoading={elevationLoading}
-            hasElevation={subGridElevations !== null}
+            mmPerHr={rainSimulation.mmPerHr}
+            onChange={rainSimulation.onRainChange}
+            isLoading={rainSimulation.elevationLoading}
+            hasElevation={rainSimulation.hasElevation}
           />
 
           <div className="map-page__sidebar-body">
@@ -1029,39 +893,64 @@ export default function MapPage() {
                       )}
                     </div>
                   </motion.div>
-
-                  {terrainView && (
-                    <motion.button
-                      type="button"
-                      variants={{
-                        hidden: { opacity: 0, y: 10 },
-                        visible: { opacity: 1, y: 0 },
-                      }}
-                      className="map-page__terrain-button mt-4 bg-white/10 hover:bg-white/20 text-white w-full py-3 rounded-md flex items-center justify-center gap-2 transition-colors border border-white/10"
-                      onClick={() => setShowTerrainPopup(true)}
-                    >
-                      <Mountain aria-hidden="true" size={18} />
-                      <span className="font-semibold">
-                        View Terrain Details
-                      </span>
-                    </motion.button>
-                  )}
                 </motion.div>
               )}
             </AnimatePresence>
           </div>
         </aside>
       </section>
-
-      {showTerrainPopup && terrainView && (
-        <TerrainPopup
-          cellId={terrainView.cellId}
-          center={terrainView.center}
-          bounds={terrainView.bounds}
-          onClose={() => setShowTerrainPopup(false)}
-        />
-      )}
     </main>
+  )
+}
+
+function MapTypeControl({
+  mode,
+  statusMessage,
+  onStatusDismiss,
+  onModeChange,
+}: {
+  mode: MapMode
+  statusMessage: string | null
+  onStatusDismiss: () => void
+  onModeChange: (mode: MapMode) => void
+}) {
+  const options: Array<{ mode: MapMode; label: string }> = [
+    { mode: 'map', label: 'Map' },
+    { mode: 'terrain', label: 'Terrain' },
+  ]
+
+  return (
+    <div className="map-type-control" aria-label="Map type">
+      <div className="map-type-control__cards">
+        {options.map((option) => (
+          <button
+            key={option.mode}
+            type="button"
+            className={`map-type-card map-type-card--${option.mode} ${
+              mode === option.mode ? 'is-active' : ''
+            }`}
+            aria-pressed={mode === option.mode}
+            onClick={() => onModeChange(option.mode)}
+          >
+            <span className="map-type-card__preview" aria-hidden="true" />
+            <span className="map-type-card__label">{option.label}</span>
+          </button>
+        ))}
+      </div>
+      {statusMessage ? (
+        <p
+          className="map-type-control__status"
+          role="status"
+          onAnimationEnd={(event) => {
+            if (event.animationName === 'terrain-status-dismiss') {
+              onStatusDismiss()
+            }
+          }}
+        >
+          {statusMessage}
+        </p>
+      ) : null}
+    </div>
   )
 }
 
@@ -1090,6 +979,8 @@ function MapCanvas({
   onCellSelect,
   waterDepths,
   selectedCellBounds,
+  mapMode,
+  onTerrainUnavailable,
 }: {
   gridCenter: LngLatTuple
   focusTarget: FocusTarget | null
@@ -1097,6 +988,8 @@ function MapCanvas({
   onCellSelect: (feature: GridCellFeature) => void
   waterDepths: number[] | null
   selectedCellBounds: BoundsTuple | null
+  mapMode: MapMode
+  onTerrainUnavailable: () => void
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -1104,6 +997,8 @@ function MapCanvas({
   const activeFeatureIdRef = useRef<number | null>(null)
   const isReadyRef = useRef(false)
   const latestGridCenterRef = useRef(gridCenter)
+  const handleCellSelect = useEffectEvent(onCellSelect)
+  const handleTerrainUnavailable = useEffectEvent(onTerrainUnavailable)
 
   latestGridCenterRef.current = gridCenter
 
@@ -1201,7 +1096,7 @@ function MapCanvas({
         { active: true },
       )
 
-      onCellSelect({
+      handleCellSelect({
         type: 'Feature',
         id: Number(feature.id),
         properties: {
@@ -1334,6 +1229,112 @@ function MapCanvas({
     }
   }, [clearSelectionVersion])
 
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !isReadyRef.current) {
+      return
+    }
+
+    const hideTerrain = () => {
+      if (map.getLayer(TERRAIN_HILLSHADE_LAYER_ID)) {
+        map.setLayoutProperty(TERRAIN_HILLSHADE_LAYER_ID, 'visibility', 'none')
+      }
+      map.setTerrain(null)
+    }
+
+    const removeFailedTerrain = () => {
+      map.setTerrain(null)
+
+      if (map.getLayer(TERRAIN_HILLSHADE_LAYER_ID)) {
+        map.removeLayer(TERRAIN_HILLSHADE_LAYER_ID)
+      }
+
+      if (map.getSource(TERRAIN_SOURCE_ID)) {
+        map.removeSource(TERRAIN_SOURCE_ID)
+      }
+    }
+
+    if (mapMode === 'map') {
+      hideTerrain()
+      return
+    }
+
+    let terrainErrorHandled = false
+
+    const handleTerrainError = (event: maplibregl.ErrorEvent) => {
+      if (terrainErrorHandled) {
+        return
+      }
+
+      const sourceId =
+        'sourceId' in event && typeof event.sourceId === 'string'
+          ? event.sourceId
+          : undefined
+
+      if (sourceId && sourceId !== TERRAIN_SOURCE_ID) {
+        return
+      }
+
+      terrainErrorHandled = true
+      removeFailedTerrain()
+      handleTerrainUnavailable()
+    }
+
+    try {
+      if (!map.getSource(TERRAIN_SOURCE_ID)) {
+        map.addSource(TERRAIN_SOURCE_ID, {
+          type: 'raster-dem',
+          tiles: [TERRAIN_TILE_URL],
+          tileSize: 256,
+          encoding: 'custom',
+          redFactor: TERRAIN_RED_FACTOR,
+          greenFactor: TERRAIN_GREEN_FACTOR,
+          blueFactor: TERRAIN_BLUE_FACTOR,
+          baseShift: TERRAIN_BASE_SHIFT,
+          minzoom: TERRAIN_MIN_ZOOM,
+          maxzoom: TERRAIN_MAX_ZOOM,
+        } as maplibregl.SourceSpecification)
+      }
+
+      if (!map.getLayer(TERRAIN_HILLSHADE_LAYER_ID)) {
+        map.addLayer(
+          {
+            id: TERRAIN_HILLSHADE_LAYER_ID,
+            type: 'hillshade',
+            source: TERRAIN_SOURCE_ID,
+            paint: {
+              'hillshade-exaggeration': 0.42,
+              'hillshade-shadow-color': '#101827',
+              'hillshade-highlight-color': '#9fd8c2',
+              'hillshade-accent-color': '#7f5539',
+            },
+          },
+          GRID_FILL_LAYER_ID,
+        )
+      } else {
+        map.setLayoutProperty(
+          TERRAIN_HILLSHADE_LAYER_ID,
+          'visibility',
+          'visible',
+        )
+      }
+
+      map.setTerrain({
+        source: TERRAIN_SOURCE_ID,
+        exaggeration: TERRAIN_EXAGGERATION,
+      })
+      map.on('error', handleTerrainError)
+    } catch (error) {
+      console.error('[MapPage] Failed to enable terrain:', error)
+      removeFailedTerrain()
+      handleTerrainUnavailable()
+    }
+
+    return () => {
+      map.off('error', handleTerrainError)
+    }
+  }, [mapMode])
+
   // Water depth overlay
   useEffect(() => {
     const map = mapRef.current
@@ -1354,48 +1355,10 @@ function MapCanvas({
       return
     }
 
-    const SUB_GRID_SIZE = 20
-    const [[west, south], [east, north]] = selectedCellBounds
-    const latStep = (north - south) / SUB_GRID_SIZE
-    const lngStep = (east - west) / SUB_GRID_SIZE
-
-    // Create GeoJSON polygons for each sub-grid cell
-    // Row 0 is at TOP (north), row (SUB_GRID_SIZE-1) is at BOTTOM (south)
-    // Col 0 is at LEFT (west), col (SUB_GRID_SIZE-1) is at RIGHT (east)
-    const features: GeoJSON.Feature<GeoJSON.Polygon>[] = []
-
-    for (let row = 0; row < SUB_GRID_SIZE; row++) {
-      for (let col = 0; col < SUB_GRID_SIZE; col++) {
-        const idx = row * SUB_GRID_SIZE + col
-        const depth = waterDepths[idx] ?? 0
-
-        if (depth <= 0) continue
-
-        // Row 0 starts at north, each row moves south by latStep
-        const cellNorth = north - row * latStep
-        const cellSouth = cellNorth - latStep
-        // Col 0 starts at west, each col moves east by lngStep
-        const cellWest = west + col * lngStep
-        const cellEast = cellWest + lngStep
-
-        features.push({
-          type: 'Feature',
-          properties: { depth },
-          geometry: {
-            type: 'Polygon',
-            coordinates: [
-              [
-                [cellWest, cellSouth],
-                [cellEast, cellSouth],
-                [cellEast, cellNorth],
-                [cellWest, cellNorth],
-                [cellWest, cellSouth],
-              ],
-            ],
-          },
-        })
-      }
-    }
+    const features = buildWaterDepthFeatures({
+      bounds: selectedCellBounds,
+      waterDepths,
+    })
 
     if (features.length === 0) return
 

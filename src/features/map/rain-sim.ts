@@ -1,3 +1,4 @@
+import type { Feature, Polygon } from 'geojson'
 import type { BoundsTuple, LngLatTuple } from './types'
 
 const SUB_GRID_SIZE = 20
@@ -143,6 +144,54 @@ export function computeWaterDepths(
   }
 
   return Array.from(depths)
+}
+
+export function buildWaterDepthFeatures({
+  bounds,
+  waterDepths,
+  subGridSize = SUB_GRID_SIZE,
+}: {
+  bounds: BoundsTuple
+  waterDepths: number[]
+  subGridSize?: number
+}): Feature<Polygon>[] {
+  const [[west, south], [east, north]] = bounds
+  const latStep = (north - south) / subGridSize
+  const lngStep = (east - west) / subGridSize
+  const features: Feature<Polygon>[] = []
+
+  for (let row = 0; row < subGridSize; row++) {
+    for (let col = 0; col < subGridSize; col++) {
+      const idx = row * subGridSize + col
+      const depth = waterDepths[idx] ?? 0
+
+      if (depth <= 0) continue
+
+      const cellNorth = north - row * latStep
+      const cellSouth = cellNorth - latStep
+      const cellWest = west + col * lngStep
+      const cellEast = cellWest + lngStep
+
+      features.push({
+        type: 'Feature',
+        properties: { depth },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [
+            [
+              [cellWest, cellSouth],
+              [cellEast, cellSouth],
+              [cellEast, cellNorth],
+              [cellWest, cellNorth],
+              [cellWest, cellSouth],
+            ],
+          ],
+        },
+      })
+    }
+  }
+
+  return features
 }
 
 export function depthToColor(depthM: number): string {
