@@ -136,15 +136,11 @@ export default function MapPage() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [suggestions, setSuggestions] = useState<SearchResult[]>([])
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
-  const [isTyping, setIsTyping] = useState(false)
   const [isFocused, setIsFocused] = useState(false)
-  const [placeholderIndex, setPlaceholderIndex] = useState(0)
   const debouncedQuery = useDebounce(searchQuery, 600)
-  const isWaiting =
-    !isTyping && searchQuery.trim() !== '' && searchQuery !== debouncedQuery
+  const isWaiting = searchQuery.trim() !== '' && searchQuery !== debouncedQuery
   const [terrainView, setTerrainView] = useState<TerrainView | null>(null)
   const [showTerrainPopup, setShowTerrainPopup] = useState(false)
-  const typingTimeoutRef = useRef<number | null>(null)
   const analysisRequestIdRef = useRef(0)
 
   // Rain simulation state
@@ -153,44 +149,15 @@ export default function MapPage() {
   )
   const [elevationLoading, setElevationLoading] = useState(false)
   const [mmPerHr, setMmPerHr] = useState(0)
-  const [waterDepths, setWaterDepths] = useState<number[]>([])
-  const selectedCellBoundsRef = useRef<BoundsTuple | null>(null)
+  const waterDepths = subGridElevations
+    ? computeWaterDepths(subGridElevations, mmPerHr)
+    : []
+  const selectedCellBounds = terrainView?.bounds ?? null
 
-  const placeholders = [
-    'Search regions...',
-    'Try "Kingston"...',
-    'Try "Montego Bay"...',
-    'Find locations...',
-  ]
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!isFocused && !searchQuery) {
-        setPlaceholderIndex((prev) => (prev + 1) % placeholders.length)
-      }
-    }, 3000)
-    return () => clearInterval(interval)
-  }, [isFocused, searchQuery, placeholders.length])
-
-  useEffect(() => {
-    return () => {
-      if (typingTimeoutRef.current !== null) {
-        window.clearTimeout(typingTimeoutRef.current)
-      }
-    }
-  }, [])
+  const placeholder = 'Search regions...'
 
   const handleSearchChange = (value: string) => {
     setSearchQuery(value)
-    setIsTyping(true)
-
-    if (typingTimeoutRef.current !== null) {
-      window.clearTimeout(typingTimeoutRef.current)
-    }
-
-    typingTimeoutRef.current = window.setTimeout(() => {
-      setIsTyping(false)
-    }, 300)
   }
 
   useEffect(() => {
@@ -363,15 +330,12 @@ export default function MapPage() {
   useEffect(() => {
     if (!terrainView) {
       setSubGridElevations(null)
-      setWaterDepths([])
-      selectedCellBoundsRef.current = null
       return
     }
 
     let cancelled = false
     setElevationLoading(true)
     setSubGridElevations(null)
-    selectedCellBoundsRef.current = terrainView.bounds
 
     fetchSubGridElevations({
       data: { bounds: terrainView.bounds, subGridSize: 20 },
@@ -380,7 +344,6 @@ export default function MapPage() {
         if (cancelled) return
         if (result.success) {
           setSubGridElevations(result.elevations)
-          setWaterDepths(computeWaterDepths(result.elevations, mmPerHr))
         }
       })
       .catch((err) => {
@@ -398,9 +361,6 @@ export default function MapPage() {
   // Handle rain slider change
   const handleRainChange = useEffectEvent((newMm: number) => {
     setMmPerHr(newMm)
-    if (subGridElevations) {
-      setWaterDepths(computeWaterDepths(subGridElevations, newMm))
-    }
   })
 
   return (
@@ -414,7 +374,7 @@ export default function MapPage() {
           clearSelectionVersion={clearSelectionVersion}
           onCellSelect={handleCellSelect}
           waterDepths={waterDepths.length > 0 ? waterDepths : null}
-          selectedCellBounds={selectedCellBoundsRef.current}
+          selectedCellBounds={selectedCellBounds}
         />
 
         <InfoCard
@@ -453,20 +413,11 @@ export default function MapPage() {
                 size={18}
               />
               <div className="relative flex flex-1 items-center overflow-hidden h-[1.5rem]">
-                <AnimatePresence mode="popLayout">
-                  {!searchQuery && (
-                    <motion.div
-                      key={placeholderIndex}
-                      initial={{ y: 15, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      exit={{ y: -15, opacity: 0 }}
-                      transition={{ duration: 0.3, ease: 'easeOut' }}
-                      className="absolute inset-0 flex items-center pointer-events-none text-[var(--text-secondary)] font-medium text-[0.96rem] whitespace-nowrap overflow-hidden"
-                    >
-                      {placeholders[placeholderIndex]}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                {!searchQuery && (
+                  <span className="absolute inset-0 flex items-center pointer-events-none text-[var(--text-secondary)] font-medium text-[0.96rem] whitespace-nowrap overflow-hidden">
+                    {placeholder}
+                  </span>
+                )}
                 <input
                   type="text"
                   value={searchQuery}

@@ -206,6 +206,8 @@ export function TerrainPopup({
       maxZoom: TERRAIN_MAX_ZOOM,
       minZoom: TERRAIN_MIN_ZOOM,
     })
+    let resizeFrame: number | null = null
+    let loadingTimer: number | null = null
 
     const handleTileError = () => {
       tileErrorCountRef.current++
@@ -235,11 +237,11 @@ export function TerrainPopup({
         },
       )
 
-      requestAnimationFrame(() => {
+      resizeFrame = window.requestAnimationFrame(() => {
         map.resize()
       })
 
-      window.setTimeout(() => {
+      loadingTimer = window.setTimeout(() => {
         map.resize()
         setIsLoading(false)
       }, 0)
@@ -248,12 +250,20 @@ export function TerrainPopup({
     mapRef.current = map
 
     return () => {
+      if (resizeFrame !== null) {
+        window.cancelAnimationFrame(resizeFrame)
+      }
+
+      if (loadingTimer !== null) {
+        window.clearTimeout(loadingTimer)
+      }
+
       if (mapRef.current) {
         mapRef.current.remove()
         mapRef.current = null
       }
     }
-  }, [center, bounds, retryCount])
+  }, [cellId, center, bounds, retryCount])
 
   const handleRetry = () => {
     setRetryCount((prev) => prev + 1)
