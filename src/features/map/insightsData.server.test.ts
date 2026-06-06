@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Db } from '../../../db/client.ts'
 import { DEFAULT_MAP_CENTER, GRID_LAT_STEP, GRID_LNG_STEP } from './config'
 
 const mockState = vi.hoisted(() => ({
@@ -23,6 +24,28 @@ const mockState = vi.hoisted(() => ({
   }>,
 }))
 
+const mockDb = {
+  query: {
+    terrainSummaries: {
+      findFirst: vi.fn(async () => mockState.terrainRow),
+    },
+    worldpopCountryPayloads: {
+      findFirst: vi.fn(async () => mockState.worldpopRow),
+    },
+  },
+  select: vi.fn((selection?: unknown) =>
+    selection
+      ? {
+          from: vi.fn(() => ({
+            where: vi.fn(async () => mockState.stormRows),
+          })),
+        }
+      : {
+          from: vi.fn(async () => mockState.surgeRows),
+        },
+  ),
+} as unknown as Db
+
 vi.mock('geotiff', () => ({
   fromArrayBuffer: vi.fn(async () => {
     throw new Error('no raster')
@@ -37,38 +60,6 @@ vi.mock('node:fs/promises', () => ({
     throw new Error('missing file')
   }),
 }))
-
-vi.mock('../../../db/client.ts', async () => {
-  const schema = await import('../../../db/schema/index.ts')
-
-  class D1BindingError extends Error {}
-
-  return {
-    schema,
-    D1BindingError,
-    db: {
-      query: {
-        terrainSummaries: {
-          findFirst: vi.fn(async () => mockState.terrainRow),
-        },
-        worldpopCountryPayloads: {
-          findFirst: vi.fn(async () => mockState.worldpopRow),
-        },
-      },
-      select: vi.fn((selection?: unknown) =>
-        selection
-          ? {
-              from: vi.fn(() => ({
-                where: vi.fn(async () => mockState.stormRows),
-              })),
-            }
-          : {
-              from: vi.fn(async () => mockState.surgeRows),
-            },
-      ),
-    },
-  }
-})
 
 describe('insightsData.server', () => {
   beforeEach(() => {
@@ -97,10 +88,14 @@ describe('insightsData.server', () => {
     }
 
     const { loadTerrainSummary } = await import('./insightsData.server')
-    const result = await loadTerrainSummary(DEFAULT_MAP_CENTER, [
-      [DEFAULT_MAP_CENTER[0] - GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] - GRID_LAT_STEP / 2],
-      [DEFAULT_MAP_CENTER[0] + GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] + GRID_LAT_STEP / 2],
-    ])
+    const result = await loadTerrainSummary(
+      DEFAULT_MAP_CENTER,
+      [
+        [DEFAULT_MAP_CENTER[0] - GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] - GRID_LAT_STEP / 2],
+        [DEFAULT_MAP_CENTER[0] + GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] + GRID_LAT_STEP / 2],
+      ],
+      mockDb,
+    )
 
     expect(result).toMatchObject({
       precision: 'coarse',
@@ -120,17 +115,21 @@ describe('insightsData.server', () => {
 
   it('returns undefined when no terrain data source is available', async () => {
     const { loadTerrainSummary } = await import('./insightsData.server')
-    const result = await loadTerrainSummary(DEFAULT_MAP_CENTER, [
-      [DEFAULT_MAP_CENTER[0] - GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] - GRID_LAT_STEP / 2],
-      [DEFAULT_MAP_CENTER[0] + GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] + GRID_LAT_STEP / 2],
-    ])
+    const result = await loadTerrainSummary(
+      DEFAULT_MAP_CENTER,
+      [
+        [DEFAULT_MAP_CENTER[0] - GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] - GRID_LAT_STEP / 2],
+        [DEFAULT_MAP_CENTER[0] + GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] + GRID_LAT_STEP / 2],
+      ],
+      mockDb,
+    )
 
     expect(result).toBeUndefined()
   })
 
   it('returns null when no surge stations are available', async () => {
     const { loadNearestSurgeStation } = await import('./insightsData.server')
-    const result = await loadNearestSurgeStation(DEFAULT_MAP_CENTER)
+    const result = await loadNearestSurgeStation(DEFAULT_MAP_CENTER, mockDb)
 
     expect(result).toBeNull()
   })
@@ -140,7 +139,7 @@ describe('insightsData.server', () => {
       './insightsData.server'
     )
 
-    const rows = await loadStormRows(DEFAULT_MAP_CENTER)
+    const rows = await loadStormRows(DEFAULT_MAP_CENTER, mockDb)
     const aggregate = aggregateStorms(rows)
 
     expect(rows).toEqual([])
@@ -154,10 +153,14 @@ describe('insightsData.server', () => {
 
   it('returns undefined population data when worldpop metadata or rasters are unavailable', async () => {
     const { loadPopulationData } = await import('./insightsData.server')
-    const result = await loadPopulationData(DEFAULT_MAP_CENTER, [
-      [DEFAULT_MAP_CENTER[0] - GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] - GRID_LAT_STEP / 2],
-      [DEFAULT_MAP_CENTER[0] + GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] + GRID_LAT_STEP / 2],
-    ])
+    const result = await loadPopulationData(
+      DEFAULT_MAP_CENTER,
+      [
+        [DEFAULT_MAP_CENTER[0] - GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] - GRID_LAT_STEP / 2],
+        [DEFAULT_MAP_CENTER[0] + GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] + GRID_LAT_STEP / 2],
+      ],
+      mockDb,
+    )
 
     expect(result).toBeUndefined()
   })

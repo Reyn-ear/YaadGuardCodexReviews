@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { createDb } from '../../../db/client'
+import { drizzle } from '../../../db/client'
 import { worldpopCountryPayloads } from '../../../db/schema'
 import type { WorldPopRecord } from '../../../db/schema'
 import { CARIBBEAN_COUNTRY_BOUNDARIES } from '../map/caribbeanCountryBoundaries'
@@ -91,8 +91,12 @@ async function upsertWorldPopRecord(
     throw new Error(`WorldPop record for ${record.iso3} has invalid ids`)
   }
 
+  if (!env.DB) {
+    throw new Error('Missing Cloudflare D1 binding: DB')
+  }
+
   try {
-    await createDb(env.DB)
+    await drizzle(env.DB)
       .insert(worldpopCountryPayloads)
       .values({
         worldpopId,

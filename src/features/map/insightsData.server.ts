@@ -1,6 +1,7 @@
 import { and, between, eq } from 'drizzle-orm'
 import { z } from 'zod'
-import { D1BindingError } from '../../../db/client.ts'
+import type { Db } from '../../../db/client.ts'
+import * as schema from '../../../db/schema'
 import { CARIBBEAN_COUNTRY_BOUNDARIES } from './caribbeanCountryBoundaries'
 import { GRID_LAT_STEP, GRID_LNG_STEP } from './config'
 import { pointInPolygon } from './geometry'
@@ -129,13 +130,14 @@ export interface NearestSurgeStationDetails extends NearestSurgeStation {
 export async function loadPopulationData(
   center: [number, number],
   bounds: BoundsTuple,
+  db: Db | null,
 ): Promise<PopulationLoadResult | undefined> {
   const country = resolveCountryByPoint(center)
   if (!country) {
     return undefined
   }
 
-  const metadata = await loadWorldPopMetadata(country.iso3)
+  const metadata = await loadWorldPopMetadata(country.iso3, db)
   const tileName = deriveTileName(center)
   const payload =
     (await loadGeneratedPopulationSummary(country.iso3, tileName, bounds)) ??
@@ -182,8 +184,12 @@ export async function loadLandCoverData(
 
 export async function loadNearestSurgeStation(
   center: [number, number],
+  db: Db | null,
 ): Promise<NearestSurgeStationDetails | null> {
-  const { db, schema } = await import('../../../db/client.ts')
+  if (!db) {
+    return null
+  }
+
   const rows = await db.select().from(schema.surgeReturnLevels)
 
   if (rows.length === 0) {
@@ -232,14 +238,18 @@ export async function loadNearestSurgeStation(
 
 export async function loadStormRows(
   center: [number, number],
+  db: Db | null,
   radiusKm = STORM_ANALOG_RADIUS_KM,
 ): Promise<StormCandidate[]> {
+  if (!db) {
+    return []
+  }
+
   const [lng, lat] = center
   const latDelta = radiusKm / 111
   const lonDelta =
     radiusKm / Math.max(111 * Math.cos((Math.abs(lat) * Math.PI) / 180), 15)
 
-  const { db, schema } = await import('../../../db/client.ts')
   const rows = await db
     .select({
       stormId: schema.stormHistoryPoints.stormId,
@@ -388,9 +398,10 @@ export function selectHistoricalAnalog(
 export async function loadTerrainSummary(
   center: [number, number],
   bounds: BoundsTuple,
+  db: Db | null,
 ): Promise<TerrainLoadResult | undefined> {
   const tileName = deriveTileName(center)
-  const databasePayload = await loadDatabaseTerrainSummary(tileName)
+  const databasePayload = await loadDatabaseTerrainSummary(tileName, db)
 
   if (databasePayload) {
     return {
@@ -460,20 +471,15 @@ export function normalizeBounds(bounds: BoundsTuple): BoundsTuple {
   ]
 }
 
-async function loadWorldPopMetadata(iso3: string) {
-  try {
-    const { db, schema } = await import('../../../db/client.ts')
-    return await db.query.worldpopCountryPayloads.findFirst({
-      where: eq(schema.worldpopCountryPayloads.iso3, iso3),
-      orderBy: (table, { desc }) => [desc(table.populationYear)],
-    })
-  } catch (error) {
-    if (error instanceof D1BindingError) {
-      return null
-    }
-
-    throw error
+async function loadWorldPopMetadata(iso3: string, db: Db | null) {
+  if (!db) {
+    return null
   }
+
+  return db.query.worldpopCountryPayloads.findFirst({
+    where: eq(schema.worldpopCountryPayloads.iso3, iso3),
+    orderBy: (table, { desc }) => [desc(table.populationYear)],
+  })
 }
 
 async function loadGeneratedPopulationSummary(
@@ -612,34 +618,30 @@ function populationCellKey(bounds: BoundsTuple) {
 
 async function loadDatabaseTerrainSummary(
   tileName: string,
+  db: Db | null,
 ): Promise<TerrainSummaryRecord | undefined> {
-  try {
-    const { db, schema } = await import('../../../db/client.ts')
-    const row = await db.query.terrainSummaries.findFirst({
-      where: eq(schema.terrainSummaries.tileName, tileName),
-    })
+  if (!db) {
+    return undefined
+  }
 
-    if (!row) {
-      return undefined
-    }
+  const row = await db.query.terrainSummaries.findFirst({
+    where: eq(schema.terrainSummaries.tileName, tileName),
+  })
 
-    return {
-      tileName: row.tileName,
-      stats: {
-        min: row.minElevationM,
-        max: row.maxElevationM,
-        mean: row.meanElevationM,
-      },
-      coverage: {
-        landCoveragePct: row.landCoveragePct,
-      },
-    }
-  } catch (error) {
-    if (error instanceof D1BindingError) {
-      return undefined
-    }
+  if (!row) {
+    return undefined
+  }
 
-    throw error
+  return {
+    tileName: row.tileName,
+    stats: {
+      min: row.minElevationM,
+      max: row.maxElevationM,
+      mean: row.meanElevationM,
+    },
+    coverage: {
+      landCoveragePct: row.landCoveragePct,
+    },
   }
 }
 

@@ -43,8 +43,7 @@ export default defineEventHandler(async (event) => {
 })
 
 function assertAdmin(event: H3Event) {
-  const configuredToken = (env as Partial<CloudflareBindings>)
-    .INGESTION_ADMIN_TOKEN
+  const configuredToken = env.INGESTION_ADMIN_TOKEN
   if (!configuredToken) {
     throw createError({
       statusCode: 503,

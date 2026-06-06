@@ -190,7 +190,5 @@ export async function processDemTerrainTile(
 }
 
 function getDemProcessor() {
-  return (env as Partial<CloudflareBindings>).GEOSPATIAL_PROCESSOR?.getByName(
-    'copernicus-dem',
-  )
+  return env.GEOSPATIAL_PROCESSOR?.getByName('copernicus-dem')
 }

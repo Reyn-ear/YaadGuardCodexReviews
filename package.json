@@ -48,6 +48,7 @@
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.40.0",
+    "@cloudflare/vitest-pool-workers": "^0.16.13",
     "@cloudflare/workers-types": "^4.20260605.1",
     "@playwright/test": "^1.60.0",
     "@tailwindcss/typography": "^0.5.19",

@@ -12,7 +12,7 @@ export type ActiveManifest = z.infer<typeof activeManifestSchema>
 let activeManifestPromise: Promise<ActiveManifest | null> | null = null
 
 export function getRuntimeBucket() {
-  return (env as Partial<CloudflareBindings>).YAAD_GUARD_BUCKET ?? null
+  return env.YAAD_GUARD_BUCKET ?? null
 }
 
 export async function readR2Object(key: string) {
@@ -45,8 +45,7 @@ export async function readR2Json<T>(key: string, schema: z.ZodType<T>) {
 export async function getActiveManifest() {
   activeManifestPromise ??= (async () => {
     const manifestKey =
-      (env as Partial<CloudflareBindings>).ACTIVE_MANIFEST_KEY ??
-      'manifests/active.json'
+      env.ACTIVE_MANIFEST_KEY ?? 'manifests/active.json'
 
     return readR2Json(manifestKey, activeManifestSchema)
   })()
