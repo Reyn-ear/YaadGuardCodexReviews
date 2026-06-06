@@ -19,7 +19,6 @@ export default [
       '.output/**',
       '.wrangler/**',
       'dist/**',
-      'refrence/**',
       'eslint.config.js',
       'prettier.config.js',
     ],

@@ -17,8 +17,6 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply yaad-guard --local",
     "db:migrate:remote": "wrangler d1 migrations apply yaad-guard --remote",
-    "ingest:start": "node scripts/ingest-start.mjs",
-    "ingest:status": "node scripts/ingest-status.mjs",
     "test": "npm run test:e2e",
     "test:e2e": "playwright test e2e/cloudflare-port.spec.ts",
     "lint": "eslint",

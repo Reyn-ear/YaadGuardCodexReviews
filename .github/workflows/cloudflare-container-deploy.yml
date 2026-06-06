@@ -10,7 +10,7 @@ on:
       - containers/geospatial/**
       - src/server.ts
       - ingestion/**
-      - scripts/ingest-*.mjs
+      - server/api/ingestion/**
       - wrangler.jsonc
       - package.json
       - package-lock.json

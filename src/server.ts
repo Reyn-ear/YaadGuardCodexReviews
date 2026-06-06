@@ -35,10 +35,6 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url)
 
-    if (url.pathname === '/api/ingestion/start') {
-      return handleIngestionStartRequest(request, env)
-    }
-
     const tileMatch = url.pathname.match(
       /^\/api\/tiles\/([^/]+)\/([^/]+)\/([^/]+)$/,
     )
@@ -52,75 +48,6 @@ export default {
     return handleIngestionQueueBatch(batch, env, ctx)
   },
 } satisfies ExportedHandler<CloudflareBindings, IngestionQueueMessage>
-
-async function handleIngestionStartRequest(
-  request: Request,
-  env: CloudflareBindings,
-) {
-  if (request.method !== 'POST') {
-    return jsonResponse({ error: 'Method not allowed' }, 405, {
-      Allow: 'POST',
-    })
-  }
-
-  const configuredToken = env.INGESTION_ADMIN_TOKEN
-  if (!configuredToken) {
-    return jsonResponse(
-      { error: 'Ingestion admin token is not configured' },
-      503,
-    )
-  }
-
-  const authHeader = request.headers.get('authorization')
-  const bearerToken = authHeader?.replace(/^Bearer\s+/i, '')
-  const explicitToken = request.headers.get('x-ingestion-token')
-
-  if (bearerToken !== configuredToken && explicitToken !== configuredToken) {
-    return jsonResponse({ error: 'Unauthorized ingestion request' }, 401)
-  }
-
-  try {
-    const body = await readJsonBody(request)
-    const sourceIds = resolveSourceIds(
-      Array.isArray(body.sourceIds)
-        ? body.sourceIds.filter((sourceId): sourceId is string => {
-            return typeof sourceId === 'string'
-          })
-        : undefined,
-    )
-    const runId =
-      typeof body.runId === 'string' && body.runId.trim()
-        ? body.runId.trim()
-        : createIngestionRunId()
-
-    if (env.DATASET_INGESTION) {
-      const instance = await env.DATASET_INGESTION.create({
-        id: runId,
-        params: {
-          runId,
-          sourceIds,
-          requestedBy: 'api',
-        },
-      })
-
-      return jsonResponse({
-        runId,
-        sourceIds,
-        status: 'queued',
-        workflowInstanceId: instance.id,
-      })
-    }
-
-    return jsonResponse(
-      await enqueueIngestionJobs(env, runId, sourceIds, 'api'),
-    )
-  } catch (error) {
-    return jsonResponse(
-      { error: error instanceof Error ? error.message : String(error) },
-      400,
-    )
-  }
-}
 
 async function handleTileRequest(
   request: Request,
@@ -211,25 +138,3 @@ async function resolveGeneratedObjectKey(env: CloudflareBindings, key: string) {
   return generatedPrefix ? `${generatedPrefix}/${normalizedKey}` : normalizedKey
 }
 
-async function readJsonBody(request: Request) {
-  if (!request.body) {
-    return {} as Record<string, unknown>
-  }
-
-  const text = await request.text()
-  if (!text.trim()) {
-    return {} as Record<string, unknown>
-  }
-
-  return JSON.parse(text) as Record<string, unknown>
-}
-
-function jsonResponse(payload: unknown, status = 200, headers?: HeadersInit) {
-  return Response.json(payload, {
-    status,
-    headers: {
-      ...headers,
-      'Cache-Control': 'no-store',
-    },
-  })
-}
