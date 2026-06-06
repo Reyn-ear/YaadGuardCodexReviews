@@ -14,31 +14,27 @@ import { AnimatePresence, motion } from 'motion/react'
 import type { FeatureCollection, Polygon } from 'geojson'
 import { Layer, Map, NavigationControl, Source } from 'react-map-gl/maplibre'
 import type {
-  FillLayer,
-  LineLayer,
+  FillLayerSpecification,
+  LineLayerSpecification,
   MapLayerMouseEvent,
   MapRef,
 } from 'react-map-gl/maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import {
+  CARIBBEAN_CAMERA_BOUNDS,
   DEFAULT_MAP_CENTER,
-  DEFAULT_MAP_ZOOM,
   GRID_FILL_LAYER_ID,
   GRID_LAT_STEP,
   GRID_LNG_STEP,
   GRID_OUTLINE_LAYER_ID,
   GRID_SOURCE_ID,
+  MAP_MAX_BOUNDS,
   MAP_STYLE_URL,
-  TERRAIN_BASE_SHIFT,
-  TERRAIN_BLUE_FACTOR,
+  TERRAIN_DISPLAY_MIN_ZOOM,
   TERRAIN_EXAGGERATION,
-  TERRAIN_GREEN_FACTOR,
+  TERRAIN_HILLSHADE_SOURCE_ID,
   TERRAIN_HILLSHADE_LAYER_ID,
-  TERRAIN_MAX_ZOOM,
-  TERRAIN_MIN_ZOOM,
-  TERRAIN_RED_FACTOR,
   TERRAIN_SOURCE_ID,
-  TERRAIN_TILE_URL,
   WATER_FILL_LAYER_ID,
   WATER_SOURCE_ID,
 } from './config'
@@ -50,6 +46,11 @@ import { InfoCard } from './InfoCard'
 import { usePlaceSearch } from './usePlaceSearch'
 import { useRainSimulation } from './useRainSimulation'
 import { buildWaterDepthFeatures } from './rain-sim'
+import {
+  getBrowserTerrainSource,
+  registerPmtilesProtocol,
+} from './terrainSources'
+import type { TerrainSourceConfig } from './terrainSources'
 import type {
   BoundsTuple,
   GridCellFeature,
@@ -84,7 +85,7 @@ type MapMode = 'map' | 'terrain'
 const REGION_INSIGHTS_STALE_TIME_MS = 10 * 60 * 1000
 const REGION_INSIGHTS_GC_TIME_MS = 30 * 60 * 1000
 
-const GRID_FILL_LAYER: FillLayer = {
+const GRID_FILL_LAYER: FillLayerSpecification = {
   id: GRID_FILL_LAYER_ID,
   type: 'fill',
   source: GRID_SOURCE_ID,
@@ -101,7 +102,7 @@ const GRID_FILL_LAYER: FillLayer = {
   },
 }
 
-const GRID_OUTLINE_LAYER: LineLayer = {
+const GRID_OUTLINE_LAYER: LineLayerSpecification = {
   id: GRID_OUTLINE_LAYER_ID,
   type: 'line',
   source: GRID_SOURCE_ID,
@@ -122,7 +123,7 @@ const GRID_OUTLINE_LAYER: LineLayer = {
   },
 }
 
-const WATER_FILL_LAYER: FillLayer = {
+const WATER_FILL_LAYER: FillLayerSpecification = {
   id: WATER_FILL_LAYER_ID,
   type: 'fill',
   source: WATER_SOURCE_ID,
@@ -149,6 +150,47 @@ const WATER_FILL_LAYER: FillLayer = {
 const EMPTY_FEATURE_COLLECTION: FeatureCollection<Polygon> = {
   type: 'FeatureCollection',
   features: [],
+}
+
+function terrainTileCoordinates(lng: number, lat: number, zoom: number) {
+  const scale = 2 ** zoom
+  const latitude = Math.max(Math.min(lat, 85.05112878), -85.05112878)
+  const latitudeRadians = (latitude * Math.PI) / 180
+
+  return {
+    x: Math.floor(((lng + 180) / 360) * scale),
+    y: Math.floor(
+      ((1 - Math.asinh(Math.tan(latitudeRadians)) / Math.PI) / 2) * scale,
+    ),
+  }
+}
+
+async function terrainSourceIsAvailable(
+  map: maplibregl.Map,
+  terrainSource: TerrainSourceConfig,
+) {
+  if (terrainSource.candidate === 'gedtm30') {
+    return true
+  }
+
+  const tileTemplate = terrainSource.source.tiles?.[0]
+  if (!tileTemplate) {
+    return false
+  }
+
+  const zoom = Math.max(
+    terrainSource.source.minzoom ?? 0,
+    Math.min(terrainSource.source.maxzoom ?? 22, Math.floor(map.getZoom())),
+  )
+  const center = map.getCenter()
+  const { x, y } = terrainTileCoordinates(center.lng, center.lat, zoom)
+  const tileUrl = tileTemplate
+    .replace('{z}', String(zoom))
+    .replace('{x}', String(x))
+    .replace('{y}', String(y))
+  const response = await fetch(tileUrl, { method: 'HEAD' })
+
+  return response.ok
 }
 
 function getLandslideRiskSummary(metrics: RegionInsightResponse['metrics']) {
@@ -209,6 +251,7 @@ export default function MapPage() {
   const [terrainStatusMessage, setTerrainStatusMessage] = useState<
     string | null
   >(null)
+  const terrainSource = useMemo(getBrowserTerrainSource, [])
   const selectedCellBounds = terrainView?.bounds ?? null
   const rainSimulation = useRainSimulation(selectedCellBounds)
   const regionInsightsQuery = useQuery({
@@ -249,7 +292,7 @@ export default function MapPage() {
     setGridCenter(result.center)
     setFocusTarget({
       id: `${result.label}:${Date.now()}`,
-      result: result,
+      result,
     })
     setTerrainView(null)
     setClearSelectionVersion((version) => version + 1)
@@ -306,6 +349,13 @@ export default function MapPage() {
     })
   })
 
+  const handleCellDeselect = useEffectEvent(() => {
+    setTerrainView(null)
+    setSelectedAnalysis(null)
+    setPanelOverride(null)
+    setIsSidebarOpen(false)
+  })
+
   const closeSidebar = useEffectEvent(() => {
     setIsSidebarOpen(false)
   })
@@ -320,6 +370,7 @@ export default function MapPage() {
           focusTarget={focusTarget}
           clearSelectionVersion={clearSelectionVersion}
           onCellSelect={handleCellSelect}
+          onCellDeselect={handleCellDeselect}
           waterDepths={
             rainSimulation.waterDepths.length > 0
               ? rainSimulation.waterDepths
@@ -327,6 +378,7 @@ export default function MapPage() {
           }
           selectedCellBounds={selectedCellBounds}
           mapMode={mapMode}
+          terrainSource={terrainSource}
           onTerrainUnavailable={() => {
             setMapMode('map')
             setTerrainStatusMessage('Terrain unavailable for this area')
@@ -335,6 +387,7 @@ export default function MapPage() {
 
         <MapTypeControl
           mode={mapMode}
+          alignLeft={panelState.status === 'empty'}
           statusMessage={terrainStatusMessage}
           onStatusDismiss={() => setTerrainStatusMessage(null)}
           onModeChange={(mode) => {
@@ -343,11 +396,13 @@ export default function MapPage() {
           }}
         />
 
-        <InfoCard
-          panelState={panelState}
-          mmPerHr={rainSimulation.mmPerHr}
-          onDetailsClick={() => setIsSidebarOpen(true)}
-        />
+        {panelState.status !== 'empty' ? (
+          <InfoCard
+            panelState={panelState}
+            mmPerHr={rainSimulation.mmPerHr}
+            onDetailsClick={() => setIsSidebarOpen(true)}
+          />
+        ) : null}
 
         <div className="map-page__search">
           <motion.div
@@ -508,6 +563,7 @@ export default function MapPage() {
             mmPerHr={rainSimulation.mmPerHr}
             onChange={rainSimulation.onRainChange}
             isLoading={rainSimulation.elevationLoading}
+            hasSelection={selectedCellBounds !== null}
             hasElevation={rainSimulation.hasElevation}
           />
 
@@ -966,11 +1022,13 @@ export default function MapPage() {
 
 function MapTypeControl({
   mode,
+  alignLeft,
   statusMessage,
   onStatusDismiss,
   onModeChange,
 }: {
   mode: MapMode
+  alignLeft: boolean
   statusMessage: string | null
   onStatusDismiss: () => void
   onModeChange: (mode: MapMode) => void
@@ -981,7 +1039,10 @@ function MapTypeControl({
   ]
 
   return (
-    <div className="map-type-control" aria-label="Map type">
+    <div
+      className={`map-type-control ${alignLeft ? 'map-type-control--left' : ''}`}
+      aria-label="Map type"
+    >
       <div className="map-type-control__cards">
         {options.map((option) => (
           <button
@@ -1038,18 +1099,22 @@ function MapCanvas({
   focusTarget,
   clearSelectionVersion,
   onCellSelect,
+  onCellDeselect,
   waterDepths,
   selectedCellBounds,
   mapMode,
+  terrainSource,
   onTerrainUnavailable,
 }: {
   gridCenter: LngLatTuple
   focusTarget: FocusTarget | null
   clearSelectionVersion: number
   onCellSelect: (feature: GridCellFeature) => void
+  onCellDeselect: () => void
   waterDepths: number[] | null
   selectedCellBounds: BoundsTuple | null
   mapMode: MapMode
+  terrainSource: TerrainSourceConfig
   onTerrainUnavailable: () => void
 }) {
   const reactMapRef = useRef<MapRef | null>(null)
@@ -1057,6 +1122,7 @@ function MapCanvas({
   const activeFeatureIdRef = useRef<number | null>(null)
   const isReadyRef = useRef(false)
   const handleCellSelect = useEffectEvent(onCellSelect)
+  const handleCellDeselect = useEffectEvent(onCellDeselect)
   const handleTerrainUnavailable = useEffectEvent(onTerrainUnavailable)
   const gridData = useMemo(
     () => createGridFeatureCollection({ center: gridCenter }),
@@ -1077,6 +1143,17 @@ function MapCanvas({
   }, [waterDepths, selectedCellBounds])
 
   const getMap = () => reactMapRef.current?.getMap()
+
+  const updateRegionalMinZoom = () => {
+    const map = getMap()
+    const camera = map?.cameraForBounds(CARIBBEAN_CAMERA_BOUNDS, {
+      padding: 0,
+    })
+
+    if (map && camera?.zoom !== undefined) {
+      map.setMinZoom(camera.zoom)
+    }
+  }
 
   const clearHoverState = () => {
     const map = getMap()
@@ -1105,11 +1182,8 @@ function MapCanvas({
   }
 
   const handleMapLoad = () => {
-    if (!getMap()) {
-      return
-    }
-
     isReadyRef.current = true
+    updateRegionalMinZoom()
   }
 
   const handleMouseMove = (event: MapLayerMouseEvent) => {
@@ -1181,6 +1255,13 @@ function MapCanvas({
       },
       geometry: feature.geometry,
     })
+  }
+
+  const handleContextMenu = (event: MapLayerMouseEvent) => {
+    event.originalEvent.preventDefault()
+    clearHoverState()
+    clearActiveState()
+    handleCellDeselect()
   }
 
   useEffect(() => {
@@ -1259,6 +1340,10 @@ function MapCanvas({
       if (map.getSource(TERRAIN_SOURCE_ID)) {
         map.removeSource(TERRAIN_SOURCE_ID)
       }
+
+      if (map.getSource(TERRAIN_HILLSHADE_SOURCE_ID)) {
+        map.removeSource(TERRAIN_HILLSHADE_SOURCE_ID)
+      }
     }
 
     if (mapMode === 'map') {
@@ -1267,6 +1352,8 @@ function MapCanvas({
     }
 
     let terrainErrorHandled = false
+    let cancelled = false
+    let isEnablingTerrain = false
 
     const handleTerrainError = (event: maplibregl.ErrorEvent) => {
       if (terrainErrorHandled) {
@@ -1287,76 +1374,122 @@ function MapCanvas({
       handleTerrainUnavailable()
     }
 
-    try {
-      if (!map.getSource(TERRAIN_SOURCE_ID)) {
-        map.addSource(TERRAIN_SOURCE_ID, {
-          type: 'raster-dem',
-          tiles: [TERRAIN_TILE_URL],
-          tileSize: 256,
-          encoding: 'custom',
-          redFactor: TERRAIN_RED_FACTOR,
-          greenFactor: TERRAIN_GREEN_FACTOR,
-          blueFactor: TERRAIN_BLUE_FACTOR,
-          baseShift: TERRAIN_BASE_SHIFT,
-          minzoom: TERRAIN_MIN_ZOOM,
-          maxzoom: TERRAIN_MAX_ZOOM,
-        })
+    const enableTerrain = async () => {
+      if (isEnablingTerrain || map.getZoom() < TERRAIN_DISPLAY_MIN_ZOOM) {
+        hideTerrain()
+        return
       }
 
-      if (!map.getLayer(TERRAIN_HILLSHADE_LAYER_ID)) {
-        map.addLayer(
-          {
-            id: TERRAIN_HILLSHADE_LAYER_ID,
-            type: 'hillshade',
-            source: TERRAIN_SOURCE_ID,
-            paint: {
-              'hillshade-exaggeration': 0.42,
-              'hillshade-shadow-color': '#101827',
-              'hillshade-highlight-color': '#9fd8c2',
-              'hillshade-accent-color': '#7f5539',
+      isEnablingTerrain = true
+
+      try {
+        if (!(await terrainSourceIsAvailable(map, terrainSource))) {
+          if (!cancelled) {
+            removeFailedTerrain()
+            handleTerrainUnavailable()
+          }
+          return
+        }
+
+        if (cancelled || map.getZoom() < TERRAIN_DISPLAY_MIN_ZOOM) {
+          hideTerrain()
+          return
+        }
+
+        if (!map.getSource(TERRAIN_SOURCE_ID)) {
+          if (terrainSource.candidate === 'gedtm30') {
+            registerPmtilesProtocol()
+          }
+          map.addSource(TERRAIN_SOURCE_ID, terrainSource.source)
+        }
+
+        if (!map.getSource(TERRAIN_HILLSHADE_SOURCE_ID)) {
+          map.addSource(TERRAIN_HILLSHADE_SOURCE_ID, terrainSource.source)
+        }
+
+        if (!map.getLayer(TERRAIN_HILLSHADE_LAYER_ID)) {
+          map.addLayer(
+            {
+              id: TERRAIN_HILLSHADE_LAYER_ID,
+              type: 'hillshade',
+              source: TERRAIN_HILLSHADE_SOURCE_ID,
+              paint: {
+                'hillshade-exaggeration': 0.42,
+                'hillshade-shadow-color': '#101827',
+                'hillshade-highlight-color': '#9fd8c2',
+                'hillshade-accent-color': '#7f5539',
+              },
             },
-          },
-          GRID_FILL_LAYER_ID,
-        )
-      } else {
-        map.setLayoutProperty(
-          TERRAIN_HILLSHADE_LAYER_ID,
-          'visibility',
-          'visible',
-        )
+            GRID_FILL_LAYER_ID,
+          )
+        } else {
+          map.setLayoutProperty(
+            TERRAIN_HILLSHADE_LAYER_ID,
+            'visibility',
+            'visible',
+          )
+        }
+
+        map.setTerrain({
+          source: TERRAIN_SOURCE_ID,
+          exaggeration: TERRAIN_EXAGGERATION,
+        })
+      } catch (error) {
+        console.error('[MapPage] Failed to enable terrain:', error)
+        removeFailedTerrain()
+        handleTerrainUnavailable()
+      } finally {
+        isEnablingTerrain = false
+      }
+    }
+
+    const handleTerrainZoom = () => {
+      if (map.getZoom() < TERRAIN_DISPLAY_MIN_ZOOM) {
+        hideTerrain()
+      }
+    }
+
+    const syncTerrainForZoom = () => {
+      if (map.getZoom() < TERRAIN_DISPLAY_MIN_ZOOM) {
+        hideTerrain()
+        return
       }
 
-      map.setTerrain({
-        source: TERRAIN_SOURCE_ID,
-        exaggeration: TERRAIN_EXAGGERATION,
-      })
-      map.on('error', handleTerrainError)
-    } catch (error) {
-      console.error('[MapPage] Failed to enable terrain:', error)
-      removeFailedTerrain()
-      handleTerrainUnavailable()
+      void enableTerrain()
     }
+
+    map.on('error', handleTerrainError)
+    map.on('zoom', handleTerrainZoom)
+    map.on('zoomend', syncTerrainForZoom)
+    syncTerrainForZoom()
 
     return () => {
+      cancelled = true
+      map.off('zoom', handleTerrainZoom)
+      map.off('zoomend', syncTerrainForZoom)
       map.off('error', handleTerrainError)
     }
-  }, [mapMode])
+  }, [mapMode, terrainSource])
 
   return (
     <div className="map-page__map" aria-label="Interactive map">
       <Map
         ref={reactMapRef}
         initialViewState={{
-          longitude: DEFAULT_MAP_CENTER[0],
-          latitude: DEFAULT_MAP_CENTER[1],
-          zoom: DEFAULT_MAP_ZOOM,
+          bounds: CARIBBEAN_CAMERA_BOUNDS,
+          fitBoundsOptions: {
+            padding: 0,
+          },
         }}
+        maxBounds={MAP_MAX_BOUNDS}
         mapStyle={MAP_STYLE_URL}
         onLoad={handleMapLoad}
+        onResize={updateRegionalMinZoom}
         interactiveLayerIds={[GRID_FILL_LAYER_ID]}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         onClick={handleClick}
+        onContextMenu={handleContextMenu}
         style={{ width: '100%', height: '100%', display: 'block' }}
       >
         <NavigationControl position="bottom-right" showCompass={false} />

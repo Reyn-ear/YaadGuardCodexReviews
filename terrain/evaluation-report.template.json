@@ -1,0 +1,32 @@
+{
+  "decision": "pending",
+  "sourceChecksum": "REQUIRED",
+  "coverageChecksum": "REQUIRED",
+  "reviewedAreas": {
+    "urban": false,
+    "forest": false,
+    "mountain": false,
+    "karst": false,
+    "plain": false,
+    "river": false,
+    "coastal": false
+  },
+  "gates": {
+    "licenseAndRedistributionConfirmed": false,
+    "horizontalAndVerticalReferencesNormalized": false,
+    "validatedElevationQualityMaintainedOrImproved": false,
+    "surfaceModelBiasReducedWithoutUnacceptableArtifacts": false,
+    "terrainDerivedRiskOutputsReviewed": false,
+    "renderingAndLodPassed": false,
+    "operationalPerformanceAcceptable": false,
+    "publishingAndRollbackPassed": false
+  },
+  "comparisons": {
+    "copernicus": null,
+    "worldBankJamaica": null,
+    "alosAw3d30": null,
+    "nasadem": null,
+    "independentCheckpoints": null
+  },
+  "notes": []
+}

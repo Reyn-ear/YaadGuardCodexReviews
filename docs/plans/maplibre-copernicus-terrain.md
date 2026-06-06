@@ -2,230 +2,285 @@
 
 ## Objective
 
-Render Copernicus DEM terrain with MapLibre's built-in 3D terrain primitives and serve precomputed, standard DEM tiles from R2. The implementation target is the MapLibre 3D terrain example style: pitched terrain, hillshade, basemap context, sky, pitch controls, and terrain controls.
+Render Copernicus DEM GLO-30 terrain with MapLibre's built-in 3D terrain
+primitives while minimizing client JavaScript, client CPU, transferred bytes,
+runtime compute, and unnecessary tile generation.
 
-Dev validation is the release gate. Once the terrain flow works in dev and the verification checklist passes, deploy the same implementation to production.
+Terrain tiles are generated during ingestion, stored as immutable artifacts in
+R2, and served through Cloudflare caching. MapLibre selects only the tiles
+needed for the current viewport and zoom. Lower zooms use coarser DEM levels,
+detail increases while zooming in, and detail stops increasing at the useful
+resolution of GLO-30.
+
+Dev validation and measured performance are release gates. Production deployment
+happens only after visual, encoding, cache, transfer-size, and client-CPU
+checks pass.
 
 ## Decisions
 
-- Use MapLibre `raster-dem` sources for terrain displacement.
-- Use MapLibre `terrain`, `hillshade`, `sky`, `NavigationControl`, and `TerrainControl`.
-- Use standard Mapbox Terrain-RGB PNG encoding for generated DEM tiles.
-- Generate terrain tiles during ingestion, store them in R2, and serve them directly at runtime.
-- Remove user-request runtime DEM processing from `/api/tiles/{z}/{x}/{y}.png`.
-- Keep the terrain coverage bounded to the Caribbean coverage window unless product scope narrows it further.
+- Keep MapLibre's native `raster-dem`, `terrain`, and `hillshade` primitives.
+- Do not add deck.gl for terrain. Its `TerrainLayer` still downloads elevation
+  images, decodes pixels, builds meshes, and adds JavaScript dependencies.
+- Generate a multi-zoom DEM pyramid during ingestion. Do not generate terrain
+  from user requests.
+- Use zoom 12 as the default maximum native-detail level for GLO-30 around
+  Jamaica. At approximately 18 degrees latitude, zoom 12 is about 36 m per
+  pixel, close to the source's approximately 30 m spacing.
+- Let MapLibre overzoom zoom-12 terrain above source zoom 12. Do not generate
+  zoom 13 unless a controlled visual benchmark demonstrates a meaningful
+  improvement that justifies approximately four times as many tiles.
+- Generate only tiles intersecting supported product coverage. Do not use the
+  previous broad `[-92, 0, -50, 35]` rectangle as the generation footprint.
+- Prefer a compact 16-bit custom elevation encoding with 0.5 m increments.
+  Benchmark it against standard Mapbox Terrain-RGB before finalizing.
+- Use optimized lossless PNG as the compatibility baseline. Benchmark lossless
+  WebP for exact pixel preservation, transfer size, decode time, and browser
+  reliability before adopting it.
+- Use immutable, versioned tile URLs with long-lived browser and edge caching.
+- Lazy-load the map and MapLibre code so non-map visits do not pay the mapping
+  JavaScript cost.
+- Keep source, encoding, coverage, and provenance metadata in a versioned
+  terrain manifest and TileJSON document.
+
+## Non-Goals
+
+- Do not synthesize terrain detail beyond the GLO-30 source resolution.
+- Do not average unrelated global DEMs into the production source without a
+  separate source-evaluation and bias-correction process.
+- Do not use lossy JPEG, lossy WebP, or lossy AVIF for elevation values.
+- Do not use the terrain tiles as survey-grade or flood-model-grade elevation.
+  GLO-30 is a digital surface model and includes vegetation and structures.
+
+## Level-of-Detail Policy
+
+The source pyramid must provide progressively greater detail as the user zooms
+in without loading all resolution levels at once.
+
+| Map zoom | Terrain policy                                              |
+| -------- | ----------------------------------------------------------- |
+| 0-7      | No visual terrain shown in the app                          |
+| 8-10     | Medium island-level DEM                                     |
+| 11-12    | Full useful GLO-30 detail                                   |
+| 13+      | Overzoom zoom-12 DEM; do not claim additional source detail |
+
+Each zoom should be generated directly from GLO-30 or an appropriate
+high-quality source overview. Do not build all lower zooms by repeatedly
+resampling already encoded child tiles.
+
+MapLibre requests visible tiles at the appropriate source zoom. It does not
+download the complete pyramid. Parent tiles may remain visible while more
+detailed child tiles load.
 
 ## Target Data Flow
 
 ```text
 Copernicus DEM GLO-30 COG
-  -> geospatial container samples DEM with rasterio
-  -> container encodes 256x256 Mapbox Terrain-RGB PNG tiles
-  -> ingestion Worker writes tiles to R2 under generated/{runId}/tiles/{z}/{x}/{y}.png
-  -> active manifest points runtime reads at the generated run prefix
-  -> /api/tiles/{z}/{x}/{y}.png streams the R2 object
-  -> MapLibre raster-dem source decodes Terrain-RGB
-  -> MapLibre terrain mesh and hillshade render in the popup
+  -> ingestion selects only supported coverage tiles
+  -> geospatial container samples the appropriate source overview per zoom
+  -> container quantizes elevations and encodes lossless raster-dem images
+  -> benchmark gate selects optimized PNG or exact lossless WebP
+  -> ingestion writes immutable, versioned tiles and metadata to R2
+  -> active manifest points to a versioned TileJSON document
+  -> Cloudflare edge serves versioned tile responses with immutable caching
+  -> lazy-loaded MapLibre raster-dem source requests visible LOD tiles only
+  -> MapLibre workers decode DEM pixels and build terrain meshes
+  -> MapLibre renders terrain and optional hillshade
 ```
 
 ## Implementation Steps
 
 ### 1. Terrain Configuration
 
-File: `src/features/map/config.ts`
+Files:
 
-Add explicit terrain config:
+- `src/features/map/config.ts`
+- The MapLibre terrain setup in `src/features/map/MapPage.tsx`
+
+Define explicit source and LOD configuration:
 
 ```ts
-export const TERRAIN_TILE_URL = '/api/tiles/{z}/{x}/{y}.png'
 export const TERRAIN_SOURCE_ID = 'terrain-dem-source'
 export const TERRAIN_HILLSHADE_LAYER_ID = 'terrain-hillshade'
-export const TERRAIN_BASEMAP_SOURCE_ID = 'terrain-basemap-source'
-export const TERRAIN_BASEMAP_LAYER_ID = 'terrain-basemap'
 export const TERRAIN_TILE_SIZE = 256
-export const TERRAIN_MIN_ZOOM = 10
-export const TERRAIN_MAX_ZOOM = 13
+export const TERRAIN_MIN_ZOOM = 6
+export const TERRAIN_DISPLAY_MIN_ZOOM = 8
+export const TERRAIN_MAX_ZOOM = 12
 export const TERRAIN_EXAGGERATION = 1.0
-export const TERRAIN_ENCODING = 'mapbox'
-export const TERRAIN_BOUNDS = [-92, 0, -50, 35] as const
+export const TERRAIN_ENCODING = 'custom'
+
+export const TERRAIN_RED_FACTOR = 0
+export const TERRAIN_GREEN_FACTOR = 128
+export const TERRAIN_BLUE_FACTOR = 0.5
+export const TERRAIN_BASE_SHIFT = -1000
 ```
 
-Remove the custom DEM factors from active use:
-
-- `TERRAIN_RED_FACTOR`
-- `TERRAIN_GREEN_FACTOR`
-- `TERRAIN_BLUE_FACTOR`
-- `TERRAIN_BASE_SHIFT`
-
-Build one `raster-dem` source shape from these constants so `TerrainPopup` cannot drift from the processor encoding.
-
-### 2. MapLibre 3D Terrain Popup
-
-File: `src/features/map/TerrainPopup.tsx`
-
-Change the popup style to follow the MapLibre 3D terrain example, adapted to local Copernicus tiles.
-
-Expected style structure:
-
-```ts
-style: {
-  version: 8,
-  sources: {
-    [TERRAIN_BASEMAP_SOURCE_ID]: {
-      type: 'raster',
-      tiles: ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png'],
-      tileSize: 256,
-      maxzoom: 19,
-      attribution: '&copy; OpenStreetMap Contributors',
-    },
-    [TERRAIN_SOURCE_ID]: {
-      type: 'raster-dem',
-      tiles: [TERRAIN_TILE_URL],
-      tileSize: TERRAIN_TILE_SIZE,
-      encoding: TERRAIN_ENCODING,
-      minzoom: TERRAIN_MIN_ZOOM,
-      maxzoom: TERRAIN_MAX_ZOOM,
-      bounds: TERRAIN_BOUNDS,
-    },
-    'terrain-focus': {
-      type: 'geojson',
-      data: focusFeatureCollection,
-    },
-  },
-  layers: [
-    {
-      id: TERRAIN_BASEMAP_LAYER_ID,
-      type: 'raster',
-      source: TERRAIN_BASEMAP_SOURCE_ID,
-      paint: { 'raster-opacity': 0.82 },
-    },
-    {
-      id: TERRAIN_HILLSHADE_LAYER_ID,
-      type: 'hillshade',
-      source: TERRAIN_SOURCE_ID,
-      paint: {
-        'hillshade-method': 'standard',
-        'hillshade-exaggeration': 0.45,
-        'hillshade-shadow-color': '#263238',
-        'hillshade-highlight-color': '#f8fafc',
-        'hillshade-accent-color': '#38bdf8',
-      },
-    },
-    focusFillLayer,
-    focusOutlineLayer,
-    focusPointLayer,
-    focusLabelLayer,
-  ],
-  terrain: {
-    source: TERRAIN_SOURCE_ID,
-    exaggeration: TERRAIN_EXAGGERATION,
-  },
-  sky: {},
-}
-```
-
-Map constructor changes:
-
-- `pitch: 70`
-- `maxPitch: 85`
-- `bearing: -20`
-- `maxZoom: TERRAIN_MAX_ZOOM`
-- `minZoom: TERRAIN_MIN_ZOOM`
-- `canvasContextAttributes: { antialias: true }`
-
-Controls:
-
-```ts
-map.addControl(
-  new maplibregl.NavigationControl({ visualizePitch: true }),
-  'bottom-right',
-)
-
-map.addControl(
-  new maplibregl.TerrainControl({
-    source: TERRAIN_SOURCE_ID,
-    exaggeration: TERRAIN_EXAGGERATION,
-  }),
-  'top-right',
-)
-```
-
-Keep the selected cell focus polygon, point, and label above the terrain.
-
-### 3. DEM Tile Encoding
-
-File: `containers/geospatial/processor.py`
-
-Replace the custom green/blue encoding in `build_terrain_tile_png` with Mapbox Terrain-RGB.
-
-Encoding formula:
+The proposed custom encoding uses green as the high byte and blue as the low
+byte:
 
 ```text
-encoded = round((elevation_m + 10000.0) * 10.0)
-r = floor(encoded / 65536)
-g = floor((encoded % 65536) / 256)
-b = encoded % 256
-height_m = -10000.0 + ((r * 256 * 256 + g * 256 + b) * 0.1)
+encoded = round((elevation_m + 1000) * 2)
+green = floor(encoded / 256)
+blue = encoded % 256
+red = 0
+
+elevation_m = green * 128 + blue * 0.5 - 1000
 ```
 
-Implementation detail:
+This provides 0.5 m increments from approximately -1000 m to 31,767.5 m.
+That precision is already finer than the practical vertical accuracy of
+GLO-30, while the constant red channel should compress better than full
+three-channel Terrain-RGB.
 
-```py
-def encode_mapbox_terrain_rgb(elevations):
-    encoded = np.round((elevations + 10000.0) * 10.0)
-    encoded = np.clip(encoded, 0, 16777215).astype(np.uint32)
+Build one typed `raster-dem` source definition from the configuration and
+terrain manifest so renderer settings cannot drift from ingestion settings.
 
-    rgba = np.zeros((TILE_SIZE, TILE_SIZE, 4), dtype=np.uint8)
-    rgba[:, :, 0] = ((encoded >> 16) & 255).astype(np.uint8)
-    rgba[:, :, 1] = ((encoded >> 8) & 255).astype(np.uint8)
-    rgba[:, :, 2] = (encoded & 255).astype(np.uint8)
-    rgba[:, :, 3] = 255
-    return rgba
-```
+The source must include accurate:
 
-Then:
+- `minzoom`
+- `maxzoom`
+- `bounds`
+- `tileSize`
+- `encoding`
+- Custom channel factors and base shift
 
-```py
-def build_terrain_tile_png(z, x, y):
-    west, south, east, north = tile_bounds(z, x, y)
-    elevations = sample_dem_grid(west, south, east, north, TILE_SIZE, TILE_SIZE)
-    rgba = encode_mapbox_terrain_rgb(elevations)
+Do not constrain the map's interactive `maxZoom` to the DEM source `maxzoom`.
+Users may zoom farther in while MapLibre overzooms the last native DEM level.
 
-    output = io.BytesIO()
-    Image.fromarray(rgba, mode="RGBA").save(output, format="PNG", optimize=True)
-    return output.getvalue()
-```
-
-No-data remains represented by `NODATA_ELEVATION_M = -2.0`, which renders slightly below sea level and keeps the current water/no-coverage behavior coherent.
-
-### 4. Runtime Tile Route
+### 2. Coverage Definition
 
 Files:
 
-- `src/server.ts`
-- `server/api/tiles/[z]/[x]/[y].ts`
-- `src/features/map/demProcessor.server.ts`
+- `src/features/map/config.ts`
+- `src/features/ingestion/terrainTiles.server.ts`, or an equivalent ingestion
+  module
 
-Make `/api/tiles/{z}/{x}/{y}.png` an R2 streaming route only.
+Replace the broad Caribbean rectangle with explicit product coverage.
 
-`src/server.ts` behavior:
+Preferred order:
 
-1. Validate method is `GET` or `HEAD`.
-2. Build key `tiles/{z}/{x}/{y}.png`.
-3. Resolve through the active manifest generated prefix.
-4. Return the R2 object body with:
-   - `Content-Type: image/png`
-   - `Cache-Control: public, max-age=3600`
-   - `Access-Control-Allow-Origin: *`
-5. Return `404` when the tile is missing.
+1. Tiles intersecting supported analysis grid cells.
+2. Buffered Jamaica or supported-island polygons.
+3. A tightly bounded product rectangle only if polygonal generation is not yet
+   available.
 
-Remove `processDemTerrainTile` from runtime tile handling. The container should not be called from user traffic for terrain tiles.
+Persist both:
 
-`server/api/tiles/[z]/[x]/[y].ts` should mirror the same R2-only behavior for the Nitro route path used in dev.
+- A simple bounding box for MapLibre source metadata.
+- A sparse tile allowlist or coverage mask for ingestion and validation.
 
-`demProcessor.server.ts` should keep processor functions needed for ingestion and compact elevation grids. The user-facing tile route should not call `processDemTerrainTile`.
+Ocean-only and unsupported tiles should not be generated merely because they
+fall inside a large rectangular extent.
 
-### 5. Ingestion-Time Tile Generation
+### 3. MapLibre Terrain Rendering
+
+File: `src/features/map/MapPage.tsx`
+
+Use the existing MapLibre map instance and add:
+
+- One `raster-dem` source.
+- Native `terrain`.
+- An optional `hillshade` layer.
+- Existing grid and focus overlays above terrain.
+- `NavigationControl` with pitch visualization.
+- `TerrainControl` only if users need to toggle exaggeration or terrain.
+
+Recommended initial settings:
+
+- Terrain mode pitch near 65-70 degrees.
+- `maxPitch` near 85 degrees.
+- Exaggeration `1.0`.
+- Source `maxzoom: 12`.
+- Visual terrain hidden below zoom 8.
+- Accurate source bounds.
+
+Performance requirements:
+
+- Do not instantiate a second map or deck.gl renderer for terrain.
+- Benchmark `canvasContextAttributes.antialias`. Leave it disabled if the
+  visual benefit does not justify GPU cost.
+- Allow hillshade to be disabled independently from terrain. On weak devices,
+  terrain without a separate hillshade pass may be the preferred profile.
+- Keep terrain disabled until the user selects terrain mode.
+
+### 4. Client JavaScript Loading
+
+Files:
+
+- The route or component that loads `MapPage`
+- MapLibre imports in `src/features/map/MapPage.tsx`
+
+Reduce initial JavaScript independently from DEM transfer optimization:
+
+1. Lazy-load the map route or map component.
+2. Dynamically load MapLibre and its terrain UI only when the map is needed.
+3. Do not add deck.gl unless a separate visualization requirement justifies its
+   bundle and runtime cost.
+4. Measure the initial non-map bundle, map chunk, and terrain activation cost.
+
+The terrain source format does not materially reduce the MapLibre JavaScript
+bundle. Bundle splitting is required to improve initial page loading.
+
+### 5. DEM Tile Encoding
+
+File: `containers/geospatial/processor.py`
+
+Implement the proposed 16-bit custom encoding as the preferred candidate, but
+retain a benchmark path for standard Mapbox Terrain-RGB.
+
+Encoding candidates:
+
+| Candidate          | Precision | Expected tradeoff                                  |
+| ------------------ | --------- | -------------------------------------------------- |
+| Custom 16-bit      | 0.5 m     | Better compression, MapLibre-web specific settings |
+| Mapbox Terrain-RGB | 0.1 m     | Broad portability, excess precision and entropy    |
+
+Image-format candidates:
+
+| Candidate     | Requirement                                                                          |
+| ------------- | ------------------------------------------------------------------------------------ |
+| Optimized PNG | Baseline; exact RGB values and broad compatibility                                   |
+| Lossless WebP | Adopt only if exact pixels, smaller transfer, and acceptable decode CPU are verified |
+
+For PNG, compare the current Pillow output with a production optimizer such as
+`oxipng` or an equivalent lossless pipeline.
+
+For WebP:
+
+- Use lossless mode only.
+- Verify decoded RGB bytes exactly match the encoded elevation bytes.
+- Test Chromium, Firefox, and Safari versions in the supported browser matrix.
+- Compare worker decode and time-to-visible-terrain on a mid-range mobile
+  device.
+
+Use RGB rather than RGBA if MapLibre and the chosen browser path preserve the
+values correctly. A constant opaque alpha channel should not be stored unless
+required.
+
+No-data handling must be explicit in the manifest. Do not silently use a valid
+low elevation as no-data when that value could be meaningful for coastal
+analysis.
+
+### 6. Tile-Size Benchmark
+
+Baseline: `256x256`.
+
+Benchmark `512x512` only as a controlled alternative. Larger tiles may reduce
+request count but increase per-request transfer, decode work, memory spikes,
+and wasted pixels near viewport edges.
+
+Record for each candidate:
+
+- Median and p95 compressed tile size.
+- Tile count for representative viewports.
+- Total transferred DEM bytes.
+- Image decode time.
+- Time to first visible terrain.
+- Peak worker and GPU memory where measurable.
+- Pan and zoom responsiveness.
+
+Do not choose 512 solely because it creates fewer HTTP requests.
+
+### 7. Ingestion-Time LOD Generation
 
 Files:
 
@@ -233,81 +288,100 @@ Files:
 - `containers/geospatial/processor.py`
 - Optional helper: `src/features/ingestion/terrainTiles.server.ts`
 
-Add a terrain tile generation job for source `T-01`.
+Add a terrain generation job for source `T-01`.
 
 Worker responsibilities:
 
-1. Compute all tile coordinates intersecting `TERRAIN_BOUNDS` for zooms `TERRAIN_MIN_ZOOM` through `TERRAIN_MAX_ZOOM`.
-2. For each tile, call the geospatial container endpoint:
+1. Load the product coverage mask.
+2. Compute sparse tile coordinates for zooms 6 through 12.
+3. Select an appropriate GLO-30 overview or resampling scale for each zoom.
+4. Call the geospatial container with explicit source, zoom, encoding, tile
+   size, and image-format parameters.
+5. Write immutable tiles under a versioned prefix.
+6. Write terrain manifest and TileJSON artifacts.
+7. Validate tile count, coverage, encoding, and representative elevation
+   roundtrips before activating the run.
+
+Suggested layout:
 
 ```text
-GET https://processor/terrain-tile?z={z}&x={x}&y={y}
+generated/{artifactVersion}/{runId}/terrain/copernicus/tiles/{z}/{x}/{y}.{ext}
+generated/{artifactVersion}/{runId}/terrain/copernicus/tilejson.json
+generated/{artifactVersion}/{runId}/terrain/copernicus/manifest.json
+generated/{artifactVersion}/{runId}/terrain/copernicus/coverage.json
 ```
 
-3. Write each PNG to:
+Process tiles with bounded concurrency. Start with concurrency `4` in dev and
+tune from measured container CPU, memory, and R2 throughput.
 
-```text
-generated/{runId}/tiles/{z}/{x}/{y}.png
-```
-
-4. Write a terrain artifact manifest:
-
-```text
-generated/{runId}/terrain/manifest.json
-```
-
-Manifest shape:
+Suggested manifest fields:
 
 ```json
 {
   "sourceId": "T-01",
-  "source": "Copernicus DEM GLO-30 COG",
-  "encoding": "mapbox",
+  "source": "Copernicus DEM GLO-30",
+  "artifactVersion": "terrain-v2",
+  "runId": "immutable-run-id",
+  "demType": "DSM",
+  "encoding": "custom",
+  "elevationIncrementM": 0.5,
+  "imageFormat": "png",
   "tileSize": 256,
-  "minZoom": 10,
-  "maxZoom": 13,
-  "bounds": [-92, 0, -50, 35],
-  "tileCount": 0,
-  "generatedAt": "2026-06-02T00:00:00.000Z"
+  "minZoom": 6,
+  "maxZoom": 12,
+  "bounds": [-78.5, 17.6, -76.0, 18.6],
+  "coverageId": "supported-jamaica-grid-v1",
+  "tileCountByZoom": {},
+  "sourceVersion": "record-the-upstream-version",
+  "generatedAt": "ISO-8601 timestamp"
 }
 ```
 
-Tile coordinate helper details:
+The example bounds are illustrative. Derive production values from the actual
+supported coverage rather than copying them into configuration.
 
-```ts
-function lonToTileX(lon: number, zoom: number) {
-  return Math.floor(((lon + 180) / 360) * 2 ** zoom)
-}
+### 8. Versioned TileJSON and Runtime Delivery
 
-function latToTileY(lat: number, zoom: number) {
-  const radians = (lat * Math.PI) / 180
-  return Math.floor(
-    ((1 - Math.log(Math.tan(radians) + 1 / Math.cos(radians)) / Math.PI) / 2) *
-      2 ** zoom,
-  )
-}
+Files:
+
+- `src/server.ts`
+- `server/api/tiles/[z]/[x]/[y].ts`, if retained for local development
+- A TileJSON or terrain metadata endpoint
+
+The active manifest should resolve to a versioned TileJSON URL. TileJSON should
+then contain immutable tile URLs, for example:
+
+```text
+/api/terrain/{artifactVersion}/{runId}/{z}/{x}/{y}.png
 ```
 
-Use inclusive ranges:
+For immutable tiles return:
 
-- `xMin = lonToTileX(west, z)`
-- `xMax = lonToTileX(east, z)`
-- `yMin = latToTileY(north, z)`
-- `yMax = latToTileY(south, z)`
+```http
+Cache-Control: public, max-age=31536000, immutable
+Access-Control-Allow-Origin: *
+Content-Type: image/png
+ETag: "<object-etag>"
+```
 
-Process tiles with bounded concurrency. Start with concurrency `4` in dev and tune after measuring container throughput.
+Also:
 
-### 6. Dev Seed Command
+- Support `GET` and `HEAD`.
+- Propagate `Content-Length`, `ETag`, and object content type where available.
+- Honor conditional requests or let Cloudflare satisfy them.
+- Cache missing immutable tile responses for a bounded period.
+- Never call the geospatial container from a user-facing tile request.
 
-Add a dev-friendly way to generate the terrain tiles before opening the map.
+Preferred production delivery is an R2 custom domain or a cacheable Worker path
+that does not invoke the application rendering stack. Keep the Nitro route only
+where needed for local parity.
 
-Preferred implementation:
+The active manifest or unversioned TileJSON pointer may use a short cache
+lifetime. The tile artifacts referenced by it are immutable.
 
-- Add a protected ingestion trigger for only `T-01`.
-- Use the existing `/api/ingestion/start` endpoint with `sourceIds: ["T-01"]`.
-- Document the exact command in `README.md` after implementation.
+### 9. Dev Seed Command
 
-Expected dev sequence:
+Provide a protected ingestion trigger for source `T-01`:
 
 ```sh
 npm run db:migrate:local
@@ -318,47 +392,82 @@ curl -X POST http://localhost:3000/api/ingestion/start \
   -d '{"sourceIds":["T-01"]}'
 ```
 
-Then open the map, select a grid cell, and open Terrain Details.
+Document the final command in `README.md` after implementation.
 
-### 7. Validation
+### 10. Validation
 
-Add deterministic checks before production deployment.
+#### Encoding validation
 
-Tile encoding validation:
+- Roundtrip representative elevations through each encoding candidate.
+- Require exact encoded-byte preservation after image decode.
+- For custom 0.5 m encoding, require error no greater than 0.25 m before
+  quantization tie handling.
+- Test negative coastal elevations, sea level, hills, and Blue Mountain
+  elevations.
+- Verify no-data behavior separately from valid elevation values.
 
-- Decode sample generated PNG pixels with the Mapbox formula.
-- Confirm representative elevations roundtrip within `0.1m`.
-- Test values:
-  - `-2.0`
-  - `0.0`
-  - `12.3`
-  - `250.0`
-  - `1200.0`
+#### LOD validation
 
-R2 artifact validation:
+- Confirm lower zoom tiles contain less spatial detail and fewer source samples.
+- Confirm detail increases through zoom 12.
+- Confirm zoom 13 and above overzoom zoom-12 data without requesting nonexistent
+  native-detail levels.
+- Confirm MapLibre requests only viewport tiles, not all zoom levels.
+- Check parent-to-child transitions for visible height jumps or seams.
 
-- `terrain/manifest.json` exists.
-- `tileCount` is greater than `0`.
-- At least one generated PNG exists for each configured zoom.
-- Sample PNG dimensions are `256x256`.
-- Sample PNG alpha channel is `255`.
+#### Coverage validation
 
-Renderer validation:
+- Confirm every supported analysis grid cell has terrain coverage.
+- Confirm ocean-only and unsupported areas are excluded.
+- Confirm source bounds prevent requests far outside supported coverage.
+- Compare sparse tile counts with the previous broad rectangular estimate.
 
-- Terrain popup opens after a grid cell selection.
-- Basemap is visible.
-- Terrain relief is visible at pitch.
-- Hillshade is visible.
-- Focus polygon, outline, point, and label are visible.
-- No browser console errors.
-- Missing tiles return `404`, not a container-generated response.
+#### Renderer validation
 
-Performance validation:
+- Basemap, terrain relief, grid, focus geometry, and labels remain visible.
+- Hillshade can be enabled and disabled independently.
+- Missing terrain degrades cleanly without removing the base map.
+- No browser console or worker errors occur.
 
-- The terrain popup does not call the geospatial container.
-- DEM tile requests are served from `/api/tiles`.
-- Total terrain tile requests for a popup remain within the expected MapLibre viewport count.
-- Time from clicking Terrain Details to visible terrain is acceptable in dev.
+#### Delivery validation
+
+- User-facing tile requests never call the geospatial container.
+- Versioned URLs return one-year immutable cache headers.
+- Repeat views produce browser or edge cache hits.
+- `HEAD`, `ETag`, `Content-Length`, CORS, and content type are correct.
+- Activating a new manifest changes URLs rather than overwriting cached tiles.
+
+#### Performance benchmark
+
+Test representative Jamaica views on desktop and a mid-range mobile device:
+
+- Cold terrain activation.
+- Warm-cache terrain activation.
+- Zoom 8 regional view.
+- Zoom 10 island view.
+- Zoom 12 local view.
+- Zoom 14 overzoomed local view.
+- Pan across a tile boundary.
+
+Compare:
+
+- Custom encoding versus Terrain-RGB.
+- Optimized PNG versus lossless WebP.
+- 256 versus 512 tile size if 512 remains a candidate.
+- Terrain with and without hillshade.
+- Antialiasing on and off.
+
+Capture:
+
+- JavaScript bytes for initial page and lazy map chunk.
+- DEM bytes transferred.
+- Number of DEM requests.
+- Time to first visible terrain.
+- Main-thread long tasks.
+- Worker CPU time where observable.
+- Frame responsiveness during pan, pitch, and zoom.
+
+Choose formats from measured results rather than compression ratio alone.
 
 Commands:
 
@@ -368,30 +477,31 @@ npm run build
 npm run test:e2e
 ```
 
-### 8. Production Deployment
+### 11. Production Deployment
 
-Production deployment happens after dev validation passes.
-
-Deployment sequence:
-
-1. Run local/dev ingestion for `T-01`.
-2. Verify the renderer and tile route in dev.
-3. Run lint, build, and e2e tests.
-4. Deploy:
-
-```sh
-npm run deploy
-```
-
-5. Run hosted ingestion for `T-01`.
-6. Verify `manifests/active.json` points at the run with terrain tiles.
-7. Open production map, select a cell, and verify Terrain Details renders with 3D terrain.
+1. Generate a dev terrain run for `T-01`.
+2. Complete visual, LOD, format, caching, and client-performance benchmarks.
+3. Record the selected encoding, image format, and tile size in the manifest
+   schema and an ADR if the project uses ADRs.
+4. Run lint, build, and end-to-end tests.
+5. Deploy the application and immutable delivery route.
+6. Generate the hosted terrain artifacts.
+7. Validate the hosted artifacts before updating `manifests/active.json`.
+8. Verify cold and warm production behavior from a supported mobile browser.
 
 ## Acceptance Criteria
 
-- `TerrainPopup` visually matches the MapLibre 3D terrain pattern with pitched terrain, sky, basemap, hillshade, and controls.
-- DEM tiles are Mapbox Terrain-RGB PNGs.
-- Runtime tile requests read from R2 only.
-- The geospatial container is used during ingestion, not user-facing tile serving.
-- Dev terrain rendering works from generated artifacts.
-- Production is deployed after the dev validation checklist passes.
+- MapLibre native `raster-dem` terrain is used without deck.gl.
+- Terrain is generated during ingestion and never generated from user traffic.
+- The LOD pyramid provides coarse regional data and full useful detail by zoom 12.
+- Zooms above 12 overzoom the last native GLO-30 level.
+- Terrain generation uses actual supported coverage rather than the old broad
+  Caribbean rectangle.
+- The selected encoding and image format are backed by transfer-size and
+  client-decode benchmarks.
+- Immutable versioned tile URLs use long-lived browser and edge caching.
+- MapLibre is lazy-loaded so non-map visits avoid its JavaScript cost.
+- Terrain, hillshade, overlays, and failure behavior pass desktop and mobile
+  validation.
+- Source version, coverage, encoding, and provenance are recorded in the
+  terrain manifest.

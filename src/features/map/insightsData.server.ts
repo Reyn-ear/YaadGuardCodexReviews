@@ -12,6 +12,7 @@ import {
   inferTerrainPositionBand,
   round,
 } from './insightMath'
+import { loadActiveTerrainCell } from './terrainRuntime.server'
 import type {
   NearestSurgeStation,
   StormAggregate,
@@ -401,6 +402,33 @@ export async function loadTerrainSummary(
   db: Db | null,
 ): Promise<TerrainLoadResult | undefined> {
   const tileName = deriveTileName(center)
+  const activeCell = await loadActiveTerrainCell(center, db)
+  if (
+    activeCell &&
+    activeCell.minElevationM !== null &&
+    activeCell.maxElevationM !== null &&
+    activeCell.meanElevationM !== null
+  ) {
+    const record = {
+      tileName: activeCell.cellId,
+      stats: {
+        min: activeCell.minElevationM,
+        max: activeCell.maxElevationM,
+        mean: activeCell.meanElevationM,
+      },
+      coverage: {
+        landCoveragePct: activeCell.landCoveragePct,
+      },
+    }
+    return {
+      record: {
+        ...record,
+        positionBand: inferTerrainPositionBand(record),
+      },
+      precision: 'cell',
+    }
+  }
+
   const databasePayload = await loadDatabaseTerrainSummary(tileName, db)
 
   if (databasePayload) {

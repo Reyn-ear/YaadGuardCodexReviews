@@ -1,0 +1,30 @@
+{
+  "sourceId": "T-02",
+  "dataset": "Global Ensemble Digital Terrain Model 30 m",
+  "productVersion": "REQUIRED",
+  "doi": "REQUIRED",
+  "sourceUrl": "REQUIRED",
+  "artifactUrl": "REQUIRED",
+  "retrievedAt": "REQUIRED",
+  "checksum": {
+    "algorithm": "sha256",
+    "value": "REQUIRED"
+  },
+  "license": {
+    "identifier": "CC-BY-4.0",
+    "artifactLicenseUrl": "REQUIRED",
+    "attribution": "REQUIRED"
+  },
+  "horizontalCrs": "REQUIRED",
+  "verticalReference": "REQUIRED",
+  "units": "m",
+  "scaleFactor": 1,
+  "noDataValue": "REQUIRED",
+  "pixelSpacing": {
+    "x": "REQUIRED",
+    "y": "REQUIRED",
+    "units": "REQUIRED"
+  },
+  "sourceTemporalRange": "REQUIRED",
+  "localRasterPath": "REQUIRED"
+}

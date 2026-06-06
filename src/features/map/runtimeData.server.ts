@@ -5,6 +5,20 @@ const activeManifestSchema = z.object({
   runId: z.string().optional(),
   generatedPrefix: z.string().trim().optional(),
   artifactVersion: z.string().optional(),
+  sourceId: z.string().optional(),
+  sourceVersion: z.string().optional(),
+  sourceChecksum: z.string().optional(),
+  coverageId: z.string().optional(),
+  coverageChecksum: z.string().optional(),
+  configurationChecksum: z.string().optional(),
+  terrain: z
+    .object({
+      source: z.string(),
+      pmtilesKey: z.string(),
+      attribution: z.string().optional(),
+    })
+    .passthrough()
+    .optional(),
 })
 
 export type ActiveManifest = z.infer<typeof activeManifestSchema>
@@ -44,8 +58,7 @@ export async function readR2Json<T>(key: string, schema: z.ZodType<T>) {
 
 export async function getActiveManifest() {
   activeManifestPromise ??= (async () => {
-    const manifestKey =
-      env.ACTIVE_MANIFEST_KEY ?? 'manifests/active.json'
+    const manifestKey = env.ACTIVE_MANIFEST_KEY ?? 'manifests/active.json'
 
     return readR2Json(manifestKey, activeManifestSchema)
   })()

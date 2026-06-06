@@ -6,6 +6,7 @@
   "main": "src/server.ts",
   "vars": {
     "ACTIVE_MANIFEST_KEY": "manifests/active.json",
+    "TERRAIN_PMTILES_KEY": "generated/gedtm30-v1.2-caribbean-512-webp/remote-20260606/terrain/gedtm30/caribbean.pmtiles",
   },
   "d1_databases": [
     {

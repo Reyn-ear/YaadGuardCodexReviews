@@ -7,6 +7,7 @@ interface CloudflareBindings {
   GEOSPATIAL_PROCESSOR?: DurableObjectNamespace
   INGESTION_ADMIN_TOKEN?: string
   ACTIVE_MANIFEST_KEY?: string
+  TERRAIN_PMTILES_KEY?: string
 }
 
 interface IngestionWorkflowParams {
