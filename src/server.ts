@@ -7,7 +7,7 @@ import {
   enqueueIngestionJobs,
   handleIngestionQueueBatch,
   resolveSourceIds,
-} from './features/ingestion/ingestion.server'
+} from '../ingestion/orchestration.ts'
 import { processDemTerrainTile } from './features/map/demProcessor.server'
 
 export class GeospatialProcessor extends Container<CloudflareBindings> {

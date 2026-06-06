@@ -6,7 +6,7 @@ import {
   createIngestionRunId,
   enqueueIngestionJobs,
   resolveSourceIds,
-} from '../../../src/features/ingestion/ingestion.server'
+} from '../../../ingestion/orchestration.ts'
 
 const requestSchema = z.object({
   runId: z.string().trim().min(1).optional(),

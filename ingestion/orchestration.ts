@@ -1,6 +1,9 @@
-import { importHurdat2StormHistory } from './hurdat2.server'
-import { importSurgeReturnLevels } from './surge.server'
-import { syncWorldPopMetadata, WORLDPOP_DATASET_ALIAS } from './worldpop.server'
+import { importHurdat2StormHistory } from './sources/hurdat2.ts'
+import { importSurgeReturnLevels } from './sources/surge.ts'
+import {
+  syncWorldPopMetadata,
+  WORLDPOP_DATASET_ALIAS,
+} from './sources/worldpop.ts'
 
 type IngestionSource = {
   id: string

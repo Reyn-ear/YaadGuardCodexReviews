@@ -9,7 +9,8 @@ on:
       - .github/workflows/cloudflare-container-deploy.yml
       - containers/geospatial/**
       - src/server.ts
-      - src/features/ingestion/**
+      - ingestion/**
+      - scripts/ingest-*.mjs
       - wrangler.jsonc
       - package.json
       - package-lock.json

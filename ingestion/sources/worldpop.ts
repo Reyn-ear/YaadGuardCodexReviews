@@ -1,8 +1,8 @@
 import { sql } from 'drizzle-orm'
-import { drizzle } from '../../../db/client'
-import { worldpopCountryPayloads } from '../../../db/schema'
-import type { WorldPopRecord } from '../../../db/schema'
-import { CARIBBEAN_COUNTRY_BOUNDARIES } from '../map/caribbeanCountryBoundaries'
+import { drizzle } from '../../db/client.ts'
+import { worldpopCountryPayloads } from '../../db/schema/index.ts'
+import type { WorldPopRecord } from '../../db/schema/index.ts'
+import { CARIBBEAN_COUNTRY_BOUNDARIES } from '../../src/features/map/caribbeanCountryBoundaries.ts'
 
 export const WORLDPOP_DATASET_ALIAS = 'G2_CN_POP_2024_100m'
 
