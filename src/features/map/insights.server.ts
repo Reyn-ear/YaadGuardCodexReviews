@@ -35,12 +35,10 @@ export async function calculateRegionInsights(
     populationData,
     landCoverData,
   ] = await Promise.all([
-    loadTerrainSummary(input.center, analysisBounds, db).catch(() => undefined),
+    loadTerrainSummary(input.center, db).catch(() => undefined),
     loadNearestSurgeStation(input.center, db).catch(() => null),
     loadStormRows(input.center, db).catch(() => []),
-    loadPopulationData(input.center, analysisBounds, db).catch(
-      () => undefined,
-    ),
+    loadPopulationData(input.center, analysisBounds, db).catch(() => undefined),
     loadLandCoverData(input.center, analysisBounds).catch(() => undefined),
   ])
 

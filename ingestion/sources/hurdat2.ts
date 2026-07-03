@@ -51,11 +51,15 @@ export async function importHurdat2StormHistory(
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
-  for (let index = 0; index < rows.length; index += 100) {
-    await env.DB.batch(
-      rows
-        .slice(index, index + 100)
-        .map((row) =>
+  const chunks = Array.from(
+    { length: Math.ceil(rows.length / 100) },
+    (_, chunkIndex) => rows.slice(chunkIndex * 100, chunkIndex * 100 + 100),
+  )
+
+  await Promise.all(
+    chunks.map((chunk) =>
+      env.DB.batch(
+        chunk.map((row) =>
           insert.bind(
             row.stormId,
             row.stormName,
@@ -69,8 +73,9 @@ export async function importHurdat2StormHistory(
             row.pressureMb,
           ),
         ),
-    )
-  }
+      ),
+    ),
+  )
 
   return {
     importedStormPoints: rows.length,

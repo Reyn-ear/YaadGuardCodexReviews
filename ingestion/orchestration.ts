@@ -100,25 +100,29 @@ export async function enqueueIngestionJobs(
     throw new Error('Missing Cloudflare Queue binding: INGESTION_QUEUE')
   }
 
-  await writeRunManifest(env, runId, ids, requestedBy)
-  await upsertRun(env, runId, 'queued', ids, requestedBy)
+  await Promise.all([
+    writeRunManifest(env, runId, ids, requestedBy),
+    upsertRun(env, runId, 'queued', ids, requestedBy),
+  ])
 
-  for (const sourceId of ids) {
-    const source = SOURCE_CATALOG[sourceId]
-    if (!source) {
-      throw new Error(`Unknown ingestion source id: ${sourceId}`)
-    }
+  await Promise.all(
+    ids.map(async (sourceId) => {
+      const source = SOURCE_CATALOG[sourceId]
+      if (!source) {
+        throw new Error(`Unknown ingestion source id: ${sourceId}`)
+      }
 
-    const action = source.downloadUrl ? 'download-source' : 'process-source'
-    await upsertJob(env, {
-      runId,
-      sourceId,
-      action,
-      status: 'queued',
-      sourceVersion: source.sourceVersion,
-    })
-    await env.INGESTION_QUEUE.send({ runId, sourceId, action })
-  }
+      const action = source.downloadUrl ? 'download-source' : 'process-source'
+      await upsertJob(env, {
+        runId,
+        sourceId,
+        action,
+        status: 'queued',
+        sourceVersion: source.sourceVersion,
+      })
+      await env.INGESTION_QUEUE.send({ runId, sourceId, action })
+    }),
+  )
 
   return {
     runId,
@@ -134,20 +138,22 @@ export async function handleIngestionQueueBatch(
 ) {
   void ctx
 
-  for (const message of batch.messages) {
-    try {
-      await handleIngestionMessage(message.body, env)
-      message.ack()
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error)
-      await upsertJob(env, {
-        ...message.body,
-        status: 'failed',
-        message: reason,
-      })
-      message.retry()
-    }
-  }
+  await Promise.all(
+    batch.messages.map(async (message) => {
+      try {
+        await handleIngestionMessage(message.body, env)
+        message.ack()
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        await upsertJob(env, {
+          ...message.body,
+          status: 'failed',
+          message: reason,
+        })
+        message.retry()
+      }
+    }),
+  )
 }
 
 async function handleIngestionMessage(
@@ -223,18 +229,19 @@ async function downloadSource(
     },
   })
 
-  await upsertJob(env, {
-    ...message,
-    status: 'downloaded',
-    sourceVersion: source.sourceVersion,
-    rawObjectKey: objectKey,
-  })
-
-  await env.INGESTION_QUEUE?.send({
-    runId: message.runId,
-    sourceId: message.sourceId,
-    action: 'process-source',
-  })
+  await Promise.all([
+    upsertJob(env, {
+      ...message,
+      status: 'downloaded',
+      sourceVersion: source.sourceVersion,
+      rawObjectKey: objectKey,
+    }),
+    env.INGESTION_QUEUE?.send({
+      runId: message.runId,
+      sourceId: message.sourceId,
+      action: 'process-source',
+    }),
+  ])
 }
 
 async function processSource(
@@ -250,31 +257,7 @@ async function processSource(
     generatedPrefix,
   })
 
-  const processorPayload = {
-    runId: message.runId,
-    source,
-    rawPrefix: `raw/${source.id}/${source.sourceVersion}/${message.runId}`,
-    generatedPrefix,
-  }
-
   let processorResult: unknown = null
-
-  if (env.GEOSPATIAL_PROCESSOR) {
-    const processor = env.GEOSPATIAL_PROCESSOR.getByName(message.runId)
-    const response = await processor.fetch('https://processor/process', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(processorPayload),
-    })
-
-    if (!response.ok) {
-      throw new Error(
-        `Processor failed for ${source.id}: ${response.status} ${response.statusText}`,
-      )
-    }
-
-    processorResult = await response.json().catch(() => null)
-  }
 
   if (source.id === 'H-01') {
     const rawObjectKey = getRawSourceObjectKey(message.runId, source)
@@ -301,13 +284,15 @@ async function processSource(
     }
   }
 
-  await writeSourceArtifact(env, generatedPrefix, source, processorResult)
-  await upsertJob(env, {
-    ...message,
-    status: 'completed',
-    sourceVersion: source.sourceVersion,
-    generatedPrefix,
-  })
+  await Promise.all([
+    writeSourceArtifact(env, generatedPrefix, source, processorResult),
+    upsertJob(env, {
+      ...message,
+      status: 'completed',
+      sourceVersion: source.sourceVersion,
+      generatedPrefix,
+    }),
+  ])
 
   await maybePublishActiveManifest(env, message.runId)
 }
@@ -405,16 +390,18 @@ async function maybePublishActiveManifest(
     publishedAt: new Date().toISOString(),
   }
 
-  await env.YAAD_GUARD_BUCKET?.put(
-    `manifests/runs/${runId}/active.json`,
-    JSON.stringify(activeManifest, null, 2),
-    { httpMetadata: { contentType: 'application/json' } },
-  )
-  await env.YAAD_GUARD_BUCKET?.put(
-    env.ACTIVE_MANIFEST_KEY ?? 'manifests/active.json',
-    JSON.stringify(activeManifest, null, 2),
-    { httpMetadata: { contentType: 'application/json' } },
-  )
+  await Promise.all([
+    env.YAAD_GUARD_BUCKET?.put(
+      `manifests/runs/${runId}/active.json`,
+      JSON.stringify(activeManifest, null, 2),
+      { httpMetadata: { contentType: 'application/json' } },
+    ),
+    env.YAAD_GUARD_BUCKET?.put(
+      env.ACTIVE_MANIFEST_KEY ?? 'manifests/active.json',
+      JSON.stringify(activeManifest, null, 2),
+      { httpMetadata: { contentType: 'application/json' } },
+    ),
+  ])
   await upsertRun(
     env,
     runId,

@@ -1,4 +1,3 @@
-import { Container } from '@cloudflare/containers'
 import handler from '@tanstack/react-start/server-entry'
 import { WorkflowEntrypoint } from 'cloudflare:workers'
 import type { WorkflowEvent, WorkflowStep } from 'cloudflare:workers'
@@ -8,13 +7,8 @@ import {
   handleIngestionQueueBatch,
   resolveSourceIds,
 } from '../ingestion/orchestration.ts'
-import { processDemTerrainTile } from './features/map/demProcessor.server'
 
-export class GeospatialProcessor extends Container<CloudflareBindings> {
-  defaultPort = 8080
-  sleepAfter = '1m'
-  enableInternet = true
-}
+const GENERATED_DATA_PREFIX = 'data'
 
 export class DatasetIngestionWorkflow extends WorkflowEntrypoint<
   CloudflareBindings,
@@ -62,35 +56,21 @@ async function handleTileRequest(
   }
 
   const [, z, x, y] = match
-  const key = `tiles/${z}/${x}/${y.replace(/\.png$/i, '')}.png`
+  const yClean = y.replace(/\.(?:png|webp)$/i, '')
+  const key = `tiles/${z}/${x}/${yClean}.webp`
   const object = await readGeneratedObject(env, key)
 
   if (object?.body) {
     return new Response(request.method === 'HEAD' ? null : object.body, {
       headers: {
         'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'public, max-age=3600',
-        'Content-Type': object.httpMetadata?.contentType ?? 'image/png',
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'Content-Type': object.httpMetadata?.contentType ?? 'image/webp',
       },
     })
   }
 
-  const tile = await processDemTerrainTile(env, z, x, y.replace(/\.png$/i, ''))
-  if (!tile) {
-    return new Response('Tile not found', { status: 404 })
-  }
-
-  await writeGeneratedObject(env, key, tile, {
-    httpMetadata: { contentType: 'image/png' },
-  })
-
-  return new Response(request.method === 'HEAD' ? null : tile, {
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Cache-Control': 'public, max-age=3600',
-      'Content-Type': 'image/png',
-    },
-  })
+  return new Response('Tile not found', { status: 404 })
 }
 
 async function readGeneratedObject(env: CloudflareBindings, key: string) {
@@ -99,42 +79,11 @@ async function readGeneratedObject(env: CloudflareBindings, key: string) {
     return null
   }
 
-  return bucket.get(await resolveGeneratedObjectKey(env, key))
+  return bucket.get(resolveDataObjectKey(key))
 }
 
-async function writeGeneratedObject(
-  env: CloudflareBindings,
-  key: string,
-  value: ArrayBuffer,
-  options?: R2PutOptions,
-) {
-  const bucket = env.YAAD_GUARD_BUCKET
-  if (!bucket) {
-    return null
-  }
-
-  return bucket.put(await resolveGeneratedObjectKey(env, key), value, options)
-}
-
-async function resolveGeneratedObjectKey(env: CloudflareBindings, key: string) {
-  const bucket = env.YAAD_GUARD_BUCKET
-  if (!bucket) {
-    return key.replace(/^\/+/, '')
-  }
-
+function resolveDataObjectKey(key: string) {
   const normalizedKey = key.replace(/^\/+/, '')
-  const activeManifestKey = env.ACTIVE_MANIFEST_KEY ?? 'manifests/active.json'
-  const activeManifestObject = await bucket.get(activeManifestKey)
-  const activeManifest = activeManifestObject
-    ? await activeManifestObject.json<{
-        generatedPrefix?: unknown
-      }>()
-    : null
-  const generatedPrefix =
-    typeof activeManifest?.generatedPrefix === 'string'
-      ? activeManifest.generatedPrefix.replace(/^\/+|\/+$/g, '')
-      : ''
 
-  return generatedPrefix ? `${generatedPrefix}/${normalizedKey}` : normalizedKey
+  return `${GENERATED_DATA_PREFIX}/${normalizedKey}`
 }
-

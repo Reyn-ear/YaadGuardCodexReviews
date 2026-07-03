@@ -1,4 +1,4 @@
-import { useEffectEvent, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useDebouncedValue } from '@tanstack/react-pacer'
 import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query'
 import { searchPlaces } from './search'
@@ -9,6 +9,7 @@ const SEARCH_DEBOUNCE_MS = 600
 const SEARCH_STALE_TIME_MS = 5 * 60 * 1000
 const SEARCH_GC_TIME_MS = 30 * 60 * 1000
 const SEARCH_QUERY_KEY = 'place-search'
+const EMPTY_SEARCH_RESULTS: SearchResult[] = []
 
 interface UsePlaceSearchOptions {
   onSelect: (result: SearchResult) => void
@@ -32,9 +33,12 @@ export function usePlaceSearch({
   )
   const isWaiting = query.trim() !== '' && searchDebouncer.state.isPending
 
-  const handleSelect = useEffectEvent(onSelect)
-  const handleNoResults = useEffectEvent(onNoResults)
-  const handleSearchError = useEffectEvent(onSearchError)
+  const handleSelect = useCallback(
+    (result: SearchResult) => onSelect(result),
+    [onSelect],
+  )
+  const handleNoResults = useCallback(() => onNoResults(), [onNoResults])
+  const handleSearchError = useCallback(() => onSearchError(), [onSearchError])
   const searchQueryOptions = {
     queryKey: [SEARCH_QUERY_KEY, debouncedQuery],
     queryFn: () => searchPlaces(debouncedQuery),
@@ -43,22 +47,25 @@ export function usePlaceSearch({
     gcTime: SEARCH_GC_TIME_MS,
     retry: false,
   } as const
-  const searchQuery = useQuery(searchQueryOptions)
+  const { data: searchResults } = useQuery(searchQueryOptions)
   const activeSearchCount = useIsFetching({ queryKey: [SEARCH_QUERY_KEY] })
-  const suggestions = searchQuery.data ?? []
+  const suggestions = searchResults ?? EMPTY_SEARCH_RESULTS
 
-  const updateQuery = useEffectEvent((nextQuery: string) => {
+  const updateQuery = useCallback((nextQuery: string) => {
     setQuery(nextQuery)
     setMessage(null)
-  })
+  }, [])
 
-  const selectResult = useEffectEvent((result: SearchResult) => {
-    setQuery('')
-    setMessage(null)
-    handleSelect(result)
-  })
+  const selectResult = useCallback(
+    (result: SearchResult) => {
+      setQuery('')
+      setMessage(null)
+      handleSelect(result)
+    },
+    [handleSelect],
+  )
 
-  const submit = useEffectEvent(async () => {
+  const submit = useCallback(async () => {
     const topSuggestion = suggestions.at(0)
     if (topSuggestion) {
       selectResult(topSuggestion)
@@ -94,7 +101,16 @@ export function usePlaceSearch({
       handleSearchError()
       setMessage('Search request failed. Please retry.')
     }
-  })
+  }, [
+    handleNoResults,
+    handleSearchError,
+    query,
+    queryClient,
+    selectResult,
+    suggestions,
+  ])
+
+  const clearMessage = useCallback(() => setMessage(null), [])
 
   return {
     query,
@@ -106,7 +122,7 @@ export function usePlaceSearch({
     isFocused,
     setIsFocused,
     placeholder: SEARCH_PLACEHOLDER,
-    clearMessage: () => setMessage(null),
+    clearMessage,
     selectResult,
     submit,
   }

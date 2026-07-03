@@ -1,4 +1,4 @@
-Welcome to your new TanStack Start app! 
+Welcome to your new TanStack Start app!
 
 # Getting Started
 
@@ -21,8 +21,62 @@ npm run dev:remote-data
 ```
 
 This uses remote bindings for `DB` and `YAAD_GUARD_BUCKET` from
-`wrangler.remote-data.jsonc`. It does not bind the ingestion queue, workflow, or
-geospatial container.
+`wrangler.remote-data.jsonc`. It does not bind the ingestion queue or workflow.
+
+## Caribbean Terrain Artifacts
+
+Production terrain and elevation are generated offline from data under
+`/Volumes/Games/InitToWinit26-terrain`. The Worker only reads uploaded R2
+artifacts; it does not run GDAL, Python, or request-time raster processing.
+
+Download and validate the Copernicus DEM GLO-30 source:
+
+```bash
+npm run terrain:download-copernicus
+npm run terrain:validate-source
+```
+
+The downloader covers `[-90, 9, -58, 33]`, including the Caribbean islands,
+Belize, The Bahamas, Turks and Caicos, and Bermuda. It writes only to
+`sources/copernicus-dem-glo-30`; the existing GEDTM30 files are not used.
+
+Generate a Copernicus Terrain-RGB PNG release. Start with the Jamaica smoke
+test, then run the full Caribbean build:
+
+```bash
+npm run terrain:generate -- --smoke-test \
+  --output=/Volumes/Games/InitToWinit26-terrain/generated/copernicus-smoke
+
+npm run terrain:generate -- \
+  --output=/Volumes/Games/InitToWinit26-terrain/generated/copernicus-glo30-caribbean
+```
+
+The full zoom 10-13 build is intentionally explicit because it can take hours
+and produce many thousands of files. Convert the generated PNG release to
+lossless WebP, preview it locally, then publish it:
+
+```bash
+npm run terrain:prepare-webp -- \
+  /Volumes/Games/InitToWinit26-terrain/generated/copernicus-glo30-caribbean \
+  /Volumes/Games/InitToWinit26-terrain/generated/copernicus-glo30-caribbean-webp
+
+npm run terrain:preview-local -- \
+  /Volumes/Games/InitToWinit26-terrain/generated/copernicus-glo30-caribbean-webp
+
+npm run dev:local-terrain
+
+npm run terrain:publish -- \
+  /Volumes/Games/InitToWinit26-terrain/generated/copernicus-glo30-caribbean-webp
+```
+
+The release directory must contain `tiles/{z}/{x}/{y}.webp` and
+`elevation-grids/**/*.json`; `terrain-summaries/**/*.json` is optional. WebP
+tiles are lossless because Terrain-RGB channel values encode elevation.
+`terrain:preview-local` serves the release from `http://localhost:4174` so the
+app can be checked visually before anything is uploaded. Publishing uploads
+directly to the flat R2 `data/` prefix and temporarily excludes `tiles/13/**`
+until z13 is ready. Publishing is rejected unless
+`provenance/source-manifest.json` identifies Copernicus DEM GLO-30 (`T-01`).
 
 # Building For Production
 
@@ -55,7 +109,6 @@ If you prefer not to use Tailwind CSS:
 
 ## Linting & Formatting
 
-
 This project uses [eslint](https://eslint.org/) and [prettier](https://prettier.io/) for linting and formatting. Eslint is configured using [tanstack/eslint-config](https://tanstack.com/config/latest/docs/eslint). The following scripts are available:
 
 ```bash
@@ -63,8 +116,6 @@ npm run lint
 npm run format
 npm run check
 ```
-
-
 
 ## Routing
 
@@ -83,7 +134,7 @@ Now that you have two routes you can use a `Link` component to navigate between 
 To use SPA (Single Page Application) navigation you will need to import the `Link` component from `@tanstack/react-router`.
 
 ```tsx
-import { Link } from "@tanstack/react-router";
+import { Link } from '@tanstack/react-router'
 ```
 
 Then anywhere in your JSX you can use it like so:
@@ -151,11 +202,11 @@ const getServerTime = createServerFn({
 // Use in a component
 function MyComponent() {
   const [time, setTime] = useState('')
-  
+
   useEffect(() => {
     getServerTime().then(setTime)
   }, [])
-  
+
   return <div>Server time: {time}</div>
 }
 ```

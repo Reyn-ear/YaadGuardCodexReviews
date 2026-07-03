@@ -244,19 +244,20 @@ Worker responsibilities:
 GET https://processor/terrain-tile?z={z}&x={x}&y={y}
 ```
 
-3. Write each PNG to:
+3. Write each PNG to the local release directory:
 
 ```text
-generated/{runId}/tiles/{z}/{x}/{y}.png
+tiles/{z}/{x}/{y}.png
 ```
 
-4. Write a terrain artifact manifest:
+4. Write terrain provenance and build metadata:
 
 ```text
-generated/{runId}/terrain/manifest.json
+provenance/source-manifest.json
+provenance/build-configuration.json
 ```
 
-Manifest shape:
+Build metadata shape:
 
 ```json
 {
@@ -383,8 +384,8 @@ Deployment sequence:
 npm run deploy
 ```
 
-5. Run hosted ingestion for `T-01`.
-6. Verify `manifests/active.json` points at the run with terrain tiles.
+5. Preview the local WebP terrain release with `npm run terrain:preview-local`.
+6. Publish the verified release to the R2 `data/` prefix.
 7. Open production map, select a cell, and verify Terrain Details renders with 3D terrain.
 
 ## Acceptance Criteria

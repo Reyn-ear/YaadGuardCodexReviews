@@ -137,6 +137,7 @@ flowchart TD
   DownloadWorker --> RawR2["R2 raw/sourceId/sourceVersion/runId"]
   Queue --> Container["Container geospatial processing\nGDAL/Python/xarray/rasterio"]
   Container --> GeneratedR2["R2 generated/artifactVersion/runId"]
+  LocalTerrain["Local terrain scripts"] --> TerrainData["R2 data/tiles + data/elevation-grids"]
   Container --> ImportSQL["D1 import SQL/data shards"]
   ImportSQL --> D1["D1 staging/runtime tables"]
   Workflow --> Validation["Validation gate"]
@@ -169,7 +170,8 @@ the deploy.
 
 ## R2 Layout
 
-Use immutable run IDs. Do not overwrite generated outputs directly.
+Use immutable run IDs for ingestion outputs. Terrain artifacts are generated
+offline and published directly to a flat `data/` prefix after local preview.
 
 ```text
 raw/{sourceId}/{sourceVersion}/{runId}/...
@@ -181,11 +183,17 @@ generated/{artifactVersion}/{runId}/landcover/{tileName}.json
 generated/{artifactVersion}/{runId}/reports/data-quality.json
 manifests/runs/{runId}.json
 manifests/active.json
+data/tiles/{z}/{x}/{y}.webp
+data/elevation-grids/{tileName}.json
+data/terrain-summaries/{tileName}.json
+data/provenance/source-manifest.json
 assets/winston.png
 assets/icons/...
 ```
 
-The public app reads through `manifests/active.json`, never directly from a newly generated run until validation passes.
+The public terrain runtime reads directly from `data/`. The ingestion manifest
+layout remains available for non-terrain pipeline outputs that still need
+run-based validation.
 
 ## D1 Schema Direction
 
@@ -282,7 +290,9 @@ Add Cloudflare bindings:
 
 ## Validation Gates
 
-The pipeline must not update `manifests/active.json` until validation passes.
+The ingestion pipeline must not update `manifests/active.json` until validation
+passes. Terrain publishing is separate: preview the local release first, then
+upload directly to `data/`.
 
 Minimum validation:
 
@@ -290,16 +300,19 @@ Minimum validation:
 - Source manifests include URL/DOI, access date, version, and license notes.
 - D1 row counts meet configured thresholds.
 - Sample R2 keys exist and are readable.
-- Terrain PNG samples decode and are non-empty.
+- Terrain WebP samples decode and are non-empty.
 - Elevation-grid samples contain exactly 400 values for `subGridSize: 20`.
 - Spot-checks for Jamaica and selected Caribbean islands return terrain, population, storm, and surge data.
 - Data-quality report is written under the run prefix.
-- Runtime smoke checks pass against a staged manifest.
+- Runtime terrain smoke checks pass against the local preview server or `data/`
+  R2 keys.
 
 Rollback:
 
 - Do not mutate old runs.
-- Roll back by repointing `manifests/active.json` to the previous successful manifest.
+- Ingestion outputs can roll back by repointing `manifests/active.json` to the
+  previous successful manifest. Terrain rollback requires republishing known-good
+  local artifacts to `data/`.
 
 ## Implementation Phases
 

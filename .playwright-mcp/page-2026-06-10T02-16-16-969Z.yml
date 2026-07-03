@@ -1,0 +1,50 @@
+- main [ref=e2]:
+  - navigation [ref=e3]:
+    - link "Yaad Guard" [ref=e4] [cursor=pointer]:
+      - /url: /
+      - img [ref=e5]
+      - generic [ref=e8]: Yaad Guard
+  - generic [ref=e9]:
+    - generic "Interactive map" [ref=e10]
+    - generic "Map type":
+      - generic [ref=e12]:
+        - button "Map" [pressed] [ref=e13] [cursor=pointer]:
+          - generic [ref=e15]: Map
+        - button "Terrain" [ref=e16] [cursor=pointer]:
+          - generic [ref=e18]: Terrain
+    - article [ref=e19]:
+      - generic [ref=e20]:
+        - generic [ref=e21]:
+          - paragraph [ref=e22]: Flood outlook
+          - heading "Overview" [level=2] [ref=e23]
+        - generic [ref=e24]: Overview
+      - paragraph [ref=e25]:
+        - text: "Current rainfall:"
+        - strong [ref=e26]: 0 mm/hour
+      - paragraph [ref=e27]: This region is prone to flooding during sustained rain. Keep a close watch if rainfall intensifies.
+      - button "Open detailed flood analysis" [ref=e28] [cursor=pointer]:
+        - generic [ref=e29]: Details
+        - img [ref=e30]
+      - generic [ref=e33]: "Threshold watch: 50 mm/hour"
+    - search [ref=e36]:
+      - img [ref=e37]
+      - generic [ref=e40]:
+        - generic: Search regions...
+        - textbox "Search locations" [ref=e41]
+      - button "Search the map" [ref=e42] [cursor=pointer]:
+        - img [ref=e44]
+        - generic [ref=e47]: Search the map
+    - complementary:
+      - generic:
+        - generic:
+          - paragraph: Region Insights
+          - heading "Hydrological view" [level=1]
+        - button "Close sidebar":
+          - img
+      - generic:
+        - img
+        - generic: Select a grid cell to enable rainfall simulation
+      - generic:
+        - generic:
+          - img
+          - paragraph: Select a grid cell or search for a place to generate hydrological insight.

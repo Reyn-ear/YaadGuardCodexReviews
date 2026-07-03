@@ -10,7 +10,10 @@ const mockState = vi.hoisted(() => ({
     meanElevationM: number
     landCoveragePct: number
   },
-  worldpopRow: null as null | { populationYear: number; payload: { files?: string[] } },
+  worldpopRow: null as null | {
+    populationYear: number
+    payload: { files?: string[] }
+  },
   surgeRows: [] as Array<Record<string, number>>,
   stormRows: [] as Array<{
     stormId: string
@@ -88,14 +91,7 @@ describe('insightsData.server', () => {
     }
 
     const { loadTerrainSummary } = await import('./insightsData.server')
-    const result = await loadTerrainSummary(
-      DEFAULT_MAP_CENTER,
-      [
-        [DEFAULT_MAP_CENTER[0] - GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] - GRID_LAT_STEP / 2],
-        [DEFAULT_MAP_CENTER[0] + GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] + GRID_LAT_STEP / 2],
-      ],
-      mockDb,
-    )
+    const result = await loadTerrainSummary(DEFAULT_MAP_CENTER, mockDb)
 
     expect(result).toMatchObject({
       precision: 'coarse',
@@ -115,14 +111,7 @@ describe('insightsData.server', () => {
 
   it('returns undefined when no terrain data source is available', async () => {
     const { loadTerrainSummary } = await import('./insightsData.server')
-    const result = await loadTerrainSummary(
-      DEFAULT_MAP_CENTER,
-      [
-        [DEFAULT_MAP_CENTER[0] - GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] - GRID_LAT_STEP / 2],
-        [DEFAULT_MAP_CENTER[0] + GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] + GRID_LAT_STEP / 2],
-      ],
-      mockDb,
-    )
+    const result = await loadTerrainSummary(DEFAULT_MAP_CENTER, mockDb)
 
     expect(result).toBeUndefined()
   })
@@ -135,9 +124,8 @@ describe('insightsData.server', () => {
   })
 
   it('returns zero-count storm aggregates and no analog when storm history is sparse', async () => {
-    const { aggregateStorms, loadStormRows, selectHistoricalAnalog } = await import(
-      './insightsData.server'
-    )
+    const { aggregateStorms, loadStormRows, selectHistoricalAnalog } =
+      await import('./insightsData.server')
 
     const rows = await loadStormRows(DEFAULT_MAP_CENTER, mockDb)
     const aggregate = aggregateStorms(rows)
@@ -156,8 +144,14 @@ describe('insightsData.server', () => {
     const result = await loadPopulationData(
       DEFAULT_MAP_CENTER,
       [
-        [DEFAULT_MAP_CENTER[0] - GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] - GRID_LAT_STEP / 2],
-        [DEFAULT_MAP_CENTER[0] + GRID_LNG_STEP / 2, DEFAULT_MAP_CENTER[1] + GRID_LAT_STEP / 2],
+        [
+          DEFAULT_MAP_CENTER[0] - GRID_LNG_STEP / 2,
+          DEFAULT_MAP_CENTER[1] - GRID_LAT_STEP / 2,
+        ],
+        [
+          DEFAULT_MAP_CENTER[0] + GRID_LNG_STEP / 2,
+          DEFAULT_MAP_CENTER[1] + GRID_LAT_STEP / 2,
+        ],
       ],
       mockDb,
     )

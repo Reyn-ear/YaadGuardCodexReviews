@@ -1,5 +1,5 @@
 import type { Feature, Polygon } from 'geojson'
-import type { BoundsTuple, LngLatTuple } from './types'
+import type { BoundsTuple } from './types'
 
 const SUB_GRID_SIZE = 20
 const TICK_HR = 5 / 60
@@ -41,29 +41,6 @@ export interface SubGridElevation {
   elevations: number[]
   bounds: BoundsTuple
   subGridSize: number
-}
-
-export function sampleSubGridBounds(
-  cellBounds: BoundsTuple,
-  subGridSize: number = SUB_GRID_SIZE,
-): LngLatTuple[][] {
-  const [[west, south], [east, north]] = cellBounds
-  const latStep = (north - south) / subGridSize
-  const lngStep = (east - west) / subGridSize
-
-  const points: LngLatTuple[][] = []
-
-  for (let row = 0; row < subGridSize; row++) {
-    const rowPoints: LngLatTuple[] = []
-    for (let col = 0; col < subGridSize; col++) {
-      const lng = west + lngStep * (col + 0.5)
-      const lat = north - latStep * (row + 0.5)
-      rowPoints.push([lng, lat])
-    }
-    points.push(rowPoints)
-  }
-
-  return points
 }
 
 function tick(
@@ -192,32 +169,4 @@ export function buildWaterDepthFeatures({
   }
 
   return features
-}
-
-export function depthToColor(depthM: number): string {
-  const maxDepth = 0.5
-  const normalized = Math.min(depthM / maxDepth, 1)
-
-  if (normalized === 0) return 'rgba(96, 165, 250, 0)'
-
-  const r = Math.round(30 + (1 - normalized) * 120)
-  const g = Math.round(100 + (1 - normalized) * 100)
-  const b = Math.round(180 + normalized * 75)
-  const a = 0.3 + normalized * 0.5
-
-  return `rgba(${r}, ${g}, ${b}, ${a})`
-}
-
-export function getDepthLevels(): Array<{
-  threshold: number
-  color: string
-  label: string
-}> {
-  return [
-    { threshold: 0, color: 'rgba(191, 219, 254, 0.3)', label: '0 cm' },
-    { threshold: 0.05, color: 'rgba(96, 165, 250, 0.4)', label: '5 cm' },
-    { threshold: 0.1, color: 'rgba(37, 99, 235, 0.5)', label: '10 cm' },
-    { threshold: 0.25, color: 'rgba(30, 64, 175, 0.6)', label: '25 cm' },
-    { threshold: 0.5, color: 'rgba(30, 27, 75, 0.7)', label: '50+ cm' },
-  ]
 }

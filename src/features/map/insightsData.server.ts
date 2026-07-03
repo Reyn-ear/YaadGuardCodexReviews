@@ -1,7 +1,10 @@
 import { and, between, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import type { Db } from '../../../db/client.ts'
-import * as schema from '../../../db/schema'
+import { stormHistoryPoints } from '../../../db/schema/stormHistory'
+import { surgeReturnLevels } from '../../../db/schema/surgeReturnLevels'
+import { terrainSummaries } from '../../../db/schema/terrainSummaries'
+import { worldpopCountryPayloads } from '../../../db/schema/worldpop'
 import { CARIBBEAN_COUNTRY_BOUNDARIES } from './caribbeanCountryBoundaries'
 import { GRID_LAT_STEP, GRID_LNG_STEP } from './config'
 import { pointInPolygon } from './geometry'
@@ -17,13 +20,15 @@ import type {
   StormAggregate,
   TerrainSummaryRecord,
 } from './insightMath'
-import {
-  processDemTerrainSummary,
-  processWorldCoverLandCoverSummary,
-  processWorldPopPopulationSummary,
-} from './demProcessor.server'
-import { readGeneratedJson, writeGeneratedObject } from './runtimeData.server'
+import { readGeneratedJson } from './runtimeData.server'
 import type { BoundsTuple, HistoricalAnalog, RegionInsightInput } from './types'
+
+const schema = {
+  stormHistoryPoints,
+  surgeReturnLevels,
+  terrainSummaries,
+  worldpopCountryPayloads,
+}
 
 const STORM_STATS_RADIUS_KM = 250
 const STORM_ANALOG_RADIUS_KM = 450
@@ -139,16 +144,11 @@ export async function loadPopulationData(
 
   const metadata = await loadWorldPopMetadata(country.iso3, db)
   const tileName = deriveTileName(center)
-  const payload =
-    (await loadGeneratedPopulationSummary(country.iso3, tileName, bounds)) ??
-    (metadata
-      ? await processAndStorePopulationSummary(
-          country.iso3,
-          tileName,
-          bounds,
-          metadata,
-        )
-      : undefined)
+  const payload = await loadGeneratedPopulationSummary(
+    country.iso3,
+    tileName,
+    bounds,
+  )
 
   if (!payload) {
     return undefined
@@ -173,7 +173,7 @@ export async function loadLandCoverData(
   const payload =
     generatedPayload && (generatedPayload.validPixelCount ?? 0) > 0
       ? generatedPayload
-      : await processAndStoreLandCoverSummary(tileName, bounds)
+      : undefined
 
   if (!payload || (payload.validPixelCount ?? 0) <= 0) {
     return undefined
@@ -269,12 +269,15 @@ export async function loadStormRows(
       ),
     )
 
-  return rows
-    .map((row) => ({
-      ...row,
-      distanceKm: haversineDistanceKm(center, [row.lon, row.lat]),
-    }))
-    .filter((row) => row.distanceKm <= radiusKm)
+  return rows.reduce<StormCandidate[]>((candidates, row) => {
+    const distanceKm = haversineDistanceKm(center, [row.lon, row.lat])
+
+    if (distanceKm <= radiusKm) {
+      candidates.push({ ...row, distanceKm })
+    }
+
+    return candidates
+  }, [])
 }
 
 export function aggregateStorms(
@@ -397,7 +400,6 @@ export function selectHistoricalAnalog(
 
 export async function loadTerrainSummary(
   center: [number, number],
-  bounds: BoundsTuple,
   db: Db | null,
 ): Promise<TerrainLoadResult | undefined> {
   const tileName = deriveTileName(center)
@@ -424,28 +426,7 @@ export async function loadTerrainSummary(
     }
   }
 
-  const processedPayload = await processDemTerrainSummary(
-    tileName,
-    tileNameToBounds(tileName) ?? bounds,
-  )
-
-  if (!processedPayload) {
-    return undefined
-  }
-
-  await writeGeneratedObject(
-    `terrain-summaries/${tileName}.json`,
-    JSON.stringify(processedPayload),
-    { httpMetadata: { contentType: 'application/json' } },
-  )
-
-  return {
-    record: {
-      ...processedPayload,
-      positionBand: inferTerrainPositionBand(processedPayload),
-    },
-    precision: 'cell',
-  }
+  return undefined
 }
 
 export function resolveAnalysisBounds(input: RegionInsightInput): BoundsTuple {
@@ -499,11 +480,13 @@ async function loadGeneratedPopulationSummary(
     `worldpop/${iso3.toLowerCase()}/${tileName}.json`,
   ]
 
-  for (const key of candidates) {
-    const payload = await readGeneratedJson(key, populationSummarySchema)
-    if (payload) {
-      return payload
-    }
+  const payloads = await Promise.all(
+    candidates.map((key) => readGeneratedJson(key, populationSummarySchema)),
+  )
+  const payload = payloads.find((candidatePayload) => candidatePayload)
+
+  if (payload) {
+    return payload
   }
 
   return undefined
@@ -521,89 +504,16 @@ async function loadGeneratedLandCoverSummary(
     `worldcover/${tileName}.json`,
   ]
 
-  for (const key of candidates) {
-    const payload = await readGeneratedJson(key, landCoverSummarySchema)
-    if (payload) {
-      return payload
-    }
+  const payloads = await Promise.all(
+    candidates.map((key) => readGeneratedJson(key, landCoverSummarySchema)),
+  )
+  const payload = payloads.find((candidatePayload) => candidatePayload)
+
+  if (payload) {
+    return payload
   }
 
   return undefined
-}
-
-async function processAndStoreLandCoverSummary(
-  tileName: string,
-  bounds: BoundsTuple,
-) {
-  const payload = await processWorldCoverLandCoverSummary({ bounds })
-  if (!payload || payload.validPixelCount <= 0) {
-    return undefined
-  }
-
-  await writeGeneratedObject(
-    `landcover/${tileName}/${populationCellKey(bounds)}.json`,
-    JSON.stringify(payload),
-    { httpMetadata: { contentType: 'application/json' } },
-  )
-
-  return payload
-}
-
-async function processAndStorePopulationSummary(
-  iso3: string,
-  tileName: string,
-  bounds: BoundsTuple,
-  metadata: Awaited<ReturnType<typeof loadWorldPopMetadata>>,
-) {
-  const rasterUrl = extractWorldPopRasterUrl(metadata?.payload)
-  if (!rasterUrl) {
-    return undefined
-  }
-
-  const payload = await processWorldPopPopulationSummary({
-    iso3,
-    bounds,
-    rasterUrl,
-    sourceYear: metadata?.populationYear ?? undefined,
-  })
-
-  if (!payload) {
-    return undefined
-  }
-
-  await writeGeneratedObject(
-    `population/${iso3}/${tileName}/${populationCellKey(bounds)}.json`,
-    JSON.stringify(payload),
-    { httpMetadata: { contentType: 'application/json' } },
-  )
-
-  return payload
-}
-
-function extractWorldPopRasterUrl(payload: unknown) {
-  const parsed =
-    typeof payload === 'string'
-      ? safeJsonParse<Record<string, unknown>>(payload)
-      : payload
-
-  if (!parsed || typeof parsed !== 'object') {
-    return undefined
-  }
-
-  const files = (parsed as { files?: unknown }).files
-  if (!Array.isArray(files)) {
-    return undefined
-  }
-
-  return files.find((file): file is string => typeof file === 'string')
-}
-
-function safeJsonParse<T>(value: string): T | undefined {
-  try {
-    return JSON.parse(value) as T
-  } catch {
-    return undefined
-  }
 }
 
 function populationCellKey(bounds: BoundsTuple) {
@@ -654,31 +564,16 @@ async function loadGeneratedTerrainSummary(
     `terrain/${tileName}.json`,
   ]
 
-  for (const key of candidates) {
-    const payload = await readGeneratedJson(key, terrainSummarySchema)
-    if (payload) {
-      return payload
-    }
+  const payloads = await Promise.all(
+    candidates.map((key) => readGeneratedJson(key, terrainSummarySchema)),
+  )
+  const payload = payloads.find((candidatePayload) => candidatePayload)
+
+  if (payload) {
+    return payload
   }
 
   return undefined
-}
-
-function tileNameToBounds(tileName: string): BoundsTuple | undefined {
-  const match = tileName.match(/^(\d+)([NS])_(\d+)([WE])$/)
-  if (!match) {
-    return undefined
-  }
-
-  const [, latValue, latHemisphere, lonValue, lonHemisphere] = match
-  const south =
-    latHemisphere === 'N' ? Number(latValue) : -(Number(latValue) + 1)
-  const west = lonHemisphere === 'W' ? -Number(lonValue) : Number(lonValue) - 1
-
-  return [
-    [west, south],
-    [west + 1, south + 1],
-  ]
 }
 
 function resolveCountryByPoint(center: [number, number]) {

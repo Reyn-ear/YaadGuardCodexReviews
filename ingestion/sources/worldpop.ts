@@ -1,7 +1,9 @@
 import { sql } from 'drizzle-orm'
 import { drizzle } from '../../db/client.ts'
-import { worldpopCountryPayloads } from '../../db/schema/index.ts'
-import type { WorldPopRecord } from '../../db/schema/index.ts'
+import {
+  worldpopCountryPayloads,
+  type WorldPopRecord,
+} from '../../db/schema/worldpop.ts'
 import { CARIBBEAN_COUNTRY_BOUNDARIES } from '../../src/features/map/caribbeanCountryBoundaries.ts'
 
 export const WORLDPOP_DATASET_ALIAS = 'G2_CN_POP_2024_100m'
@@ -22,16 +24,25 @@ export async function syncWorldPopMetadata(env: CloudflareBindings) {
   const imported: string[] = []
   const missing: string[] = []
 
-  for (const country of countries) {
-    const record = await fetchWorldPopRecord(country.iso3)
+  const results = await Promise.all(
+    countries.map(async (country) => {
+      const record = await fetchWorldPopRecord(country.iso3)
 
-    if (!record) {
-      missing.push(country.iso3)
-      continue
+      if (!record) {
+        return { iso3: country.iso3, status: 'missing' as const }
+      }
+
+      await upsertWorldPopRecord(env, record, country.name)
+      return { iso3: country.iso3, status: 'imported' as const }
+    }),
+  )
+
+  for (const result of results) {
+    if (result.status === 'imported') {
+      imported.push(result.iso3)
+    } else {
+      missing.push(result.iso3)
     }
-
-    await upsertWorldPopRecord(env, record, country.name)
-    imported.push(country.iso3)
   }
 
   return {

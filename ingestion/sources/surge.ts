@@ -87,45 +87,52 @@ export async function importSurgeReturnLevels(
     `,
   )
 
-  for (let index = 0; index < surgeRows.length; index += 100) {
-    const chunk = surgeRows.slice(index, index + 100)
-    await env.DB.batch(
-      chunk.map((row) =>
-        statement.bind(
-          row.stationId,
-          row.lat,
-          row.lon,
-          row.rp1Bestfit,
-          row.rp1Lower5,
-          row.rp1Upper95,
-          row.rp2Bestfit,
-          row.rp2Lower5,
-          row.rp2Upper95,
-          row.rp5Bestfit,
-          row.rp5Lower5,
-          row.rp5Upper95,
-          row.rp10Bestfit,
-          row.rp10Lower5,
-          row.rp10Upper95,
-          row.rp25Bestfit,
-          row.rp25Lower5,
-          row.rp25Upper95,
-          row.rp50Bestfit,
-          row.rp50Lower5,
-          row.rp50Upper95,
-          row.rp75Bestfit,
-          row.rp75Lower5,
-          row.rp75Upper95,
-          row.rp100Bestfit,
-          row.rp100Lower5,
-          row.rp100Upper95,
-          row.evaScale,
-          row.evaShape,
-          row.evaLoc,
+  const chunks = Array.from(
+    { length: Math.ceil(surgeRows.length / 100) },
+    (_, chunkIndex) =>
+      surgeRows.slice(chunkIndex * 100, chunkIndex * 100 + 100),
+  )
+
+  await Promise.all(
+    chunks.map((chunk) =>
+      env.DB.batch(
+        chunk.map((row) =>
+          statement.bind(
+            row.stationId,
+            row.lat,
+            row.lon,
+            row.rp1Bestfit,
+            row.rp1Lower5,
+            row.rp1Upper95,
+            row.rp2Bestfit,
+            row.rp2Lower5,
+            row.rp2Upper95,
+            row.rp5Bestfit,
+            row.rp5Lower5,
+            row.rp5Upper95,
+            row.rp10Bestfit,
+            row.rp10Lower5,
+            row.rp10Upper95,
+            row.rp25Bestfit,
+            row.rp25Lower5,
+            row.rp25Upper95,
+            row.rp50Bestfit,
+            row.rp50Lower5,
+            row.rp50Upper95,
+            row.rp75Bestfit,
+            row.rp75Lower5,
+            row.rp75Upper95,
+            row.rp100Bestfit,
+            row.rp100Lower5,
+            row.rp100Upper95,
+            row.evaScale,
+            row.evaShape,
+            row.evaLoc,
+          ),
         ),
       ),
-    )
-  }
+    ),
+  )
 
   return {
     importedSurgeStations: surgeRows.length,
