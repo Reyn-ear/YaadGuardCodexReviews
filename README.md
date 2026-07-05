@@ -1,19 +1,89 @@
 Welcome to your new TanStack Start app!
 
-# Getting Started
+Yaad Guard is an interactive Caribbean flood-risk explorer. It combines
+terrain, storm history, storm-surge return levels, population, land cover, and
+user-selected rainfall to produce deterministic regional risk summaries.
 
-To run this application:
+The application currently provides:
+
+- Place search constrained to supported Caribbean map bounds.
+- Selectable map grid cells and location-based risk summaries.
+- Rainfall simulation with estimated surface-water depth.
+- MapLibre 3D terrain and hillshade backed by generated DEM tiles.
+- Historical storm, surge, terrain, population, and land-cover context.
+- A Cloudflare-native ingestion pipeline for versioned source data.
+
+> Yaad Guard is an informational planning tool, not an emergency warning
+> system or a substitute for official forecasts and evacuation guidance.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  Browser["React + MapLibre"] --> Worker["Cloudflare Worker<br/>TanStack Start + Nitro"]
+  Worker --> D1["D1<br/>risk and ingestion data"]
+  Worker --> R2["R2<br/>terrain and generated artifacts"]
+  Worker --> Photon["Photon geocoder"]
+
+  Admin["Admin ingestion request"] --> Workflow["Cloudflare Workflow"]
+  Workflow --> Queue["Cloudflare Queue"]
+  Queue --> Sources["Allowlisted public datasets"]
+  Queue --> Container["Geospatial container"]
+  Sources --> R2
+  Container --> R2
+  Container --> D1
+```
+
+Runtime insights are deterministic; the application does not call an LLM to
+generate risk scores or advisories.
+
+## Data Sources
+
+| ID     | Dataset               | Purpose                                           |
+| ------ | --------------------- | ------------------------------------------------- |
+| `T-01` | Copernicus DEM GLO-30 | Terrain summaries, elevation grids, and DEM tiles |
+| `T-09` | ESA WorldCover        | Land-cover and water context                      |
+| `H-01` | NOAA/NHC HURDAT2      | Historical Atlantic storm tracks                  |
+| `H-12` | GTSM-ERA5-E           | Storm-surge and extreme sea-level return values   |
+| `E-02` | WorldPop              | Population and exposure context                   |
+
+Raw and generated artifacts are stored in R2. An active manifest at
+`manifests/active.json` selects the generated dataset version used at runtime.
+
+## Tech Stack
+
+- TanStack Start, TanStack Router, React 19, and Vite
+- MapLibre GL through `react-map-gl`
+- Tailwind CSS
+- Cloudflare Workers, D1, R2, Queues, Workflows, and Containers
+- Drizzle ORM
+- Vitest and Playwright
+
+## Local Development
+
+Requirements:
+
+- Node.js and npm
+- A Cloudflare account for remote data, deployment, or ingestion
+- Docker when building or deploying the geospatial container
+
+Install dependencies and start the local development server:
 
 ```bash
 npm install
+npm run db:migrate:local
 npm run dev
 ```
 
-## Cloudflare Remote Data In Dev
+Open [http://localhost:3000](http://localhost:3000).
 
-Local dev uses simulated D1 and R2 by default. To run local code against the real
-Cloudflare D1 database and R2 bucket, authenticate Wrangler and use the
-remote-data config:
+Local development uses simulated D1 and R2 bindings. Queue, Workflow, and
+Container processing are disabled locally by default.
+
+### Use Remote Cloudflare Data
+
+To run the local application against the configured production D1 database and
+R2 bucket:
 
 ```bash
 npx wrangler login
@@ -78,20 +148,27 @@ directly to the flat R2 `data/` prefix and temporarily excludes `tiles/13/**`
 until z13 is ready. Publishing is rejected unless
 `provenance/source-manifest.json` identifies Copernicus DEM GLO-30 (`T-01`).
 
-# Building For Production
+## Database
 
-To build this application for production:
+The D1 schema is defined with Drizzle under `db/schema` and migrations are
+stored in `db/migrations`.
 
 ```bash
-npm run build
+# Generate a migration after changing the schema
+npm run db:generate
+
+# Apply migrations
+npm run db:migrate:local
+npm run db:migrate:remote
 ```
 
-## Testing
+## Ingestion
 
-This project uses [Vitest](https://vitest.dev/) for testing. You can run the tests with:
+Ingestion is admin-only and accepts source IDs from the allowlist above.
+Configure the production secret before calling the endpoints:
 
 ```bash
-npm run test
+npx wrangler secret put INGESTION_ADMIN_TOKEN
 ```
 
 ## Styling
@@ -112,9 +189,10 @@ If you prefer not to use Tailwind CSS:
 This project uses [eslint](https://eslint.org/) and [prettier](https://prettier.io/) for linting and formatting. Eslint is configured using [tanstack/eslint-config](https://tanstack.com/config/latest/docs/eslint). The following scripts are available:
 
 ```bash
-npm run lint
-npm run format
-npm run check
+curl -X POST https://<worker-host>/api/ingestion/start \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"sourceIds":["H-01","E-02"]}'
 ```
 
 ## Routing
@@ -137,51 +215,51 @@ To use SPA (Single Page Application) navigation you will need to import the `Lin
 import { Link } from '@tanstack/react-router'
 ```
 
-Then anywhere in your JSX you can use it like so:
+The pipeline records run and job status in D1, stores raw inputs and generated
+artifacts in R2, and publishes completed data through the active manifest.
 
-```tsx
-<Link to="/about">About</Link>
+## Commands
+
+| Command                   | Description                          |
+| ------------------------- | ------------------------------------ |
+| `npm run dev`             | Start local development on port 3000 |
+| `npm run dev:remote-data` | Start locally with remote D1 and R2  |
+| `npm run build`           | Create a production build            |
+| `npm run preview`         | Preview the production build         |
+| `npm run deploy`          | Build and deploy with Wrangler       |
+| `npm run cf:typegen`      | Regenerate Cloudflare binding types  |
+| `npm run test:unit`       | Run unit tests                       |
+| `npm run test:e2e`        | Run Playwright tests                 |
+| `npm test`                | Run unit and end-to-end tests        |
+| `npm run lint`            | Run ESLint                           |
+| `npm run format`          | Check formatting                     |
+| `npm run check`           | Apply Prettier and ESLint fixes      |
+
+## Deployment
+
+The Worker and its bindings are configured in `wrangler.jsonc`. Confirm the D1,
+R2, Queue, Workflow, Durable Object, and Container resources exist in the
+target Cloudflare account, then run:
+
+```bash
+npm run db:migrate:remote
+npm run deploy
 ```
 
-This will create a link that will navigate to the `/about` route.
+Wrangler builds the geospatial image from
+`containers/geospatial/Dockerfile` during deployment.
 
-More information on the `Link` component can be found in the [Link documentation](https://tanstack.com/router/v1/docs/framework/react/api/router/linkComponent).
+## Project Layout
 
-### Using A Layout
-
-In the File Based Routing setup the layout is located in `src/routes/__root.tsx`. Anything you add to the root route will appear in all the routes. The route content will appear in the JSX where you render `{children}` in the `shellComponent`.
-
-Here is an example layout that includes a header:
-
-```tsx
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
-
-export const Route = createRootRoute({
-  head: () => ({
-    meta: [
-      { charSet: 'utf-8' },
-      { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { title: 'My App' },
-    ],
-  }),
-  shellComponent: ({ children }) => (
-    <html lang="en">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        <header>
-          <nav>
-            <Link to="/">Home</Link>
-            <Link to="/about">About</Link>
-          </nav>
-        </header>
-        {children}
-        <Scripts />
-      </body>
-    </html>
-  ),
-})
+```text
+src/features/map/       Map UI, risk analysis, terrain, and rain simulation
+src/routes/             TanStack Router routes
+server/api/             Nitro API routes
+ingestion/              Source catalog and ingestion orchestration
+containers/geospatial/  Python geospatial processing container
+db/schema/              Drizzle D1 schema
+db/migrations/          D1 migrations
+docs/                   Architecture and implementation plans
 ```
 
 More information on layouts can be found in the [Layouts documentation](https://tanstack.com/router/latest/docs/framework/react/guide/routing-concepts#layouts).

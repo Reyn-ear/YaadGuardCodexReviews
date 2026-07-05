@@ -14,6 +14,7 @@ type IngestionSource = {
   landingUrl: string
   downloadUrl?: string
   downloadFilename?: string
+  workerIngestion?: boolean
 }
 
 type JobStatus =
@@ -32,6 +33,15 @@ export const SOURCE_CATALOG: Partial<Record<string, IngestionSource>> = {
     collection: 'Copernicus DEM 30m COG tiles',
     sourceVersion: 'glo-30',
     landingUrl: 'https://registry.opendata.aws/copernicus-dem/',
+  },
+  'T-02': {
+    id: 'T-02',
+    name: 'Global Ensemble Digital Terrain Model 30 m',
+    provider: 'OpenLandMap / GEDTM30 contributors',
+    collection: 'Immutable GEDTM30 COG release selected by source manifest',
+    sourceVersion: 'candidate-requires-frozen-manifest',
+    landingUrl: 'https://github.com/openlandmap/GEDTM30',
+    workerIngestion: false,
   },
   'T-09': {
     id: 'T-09',
@@ -77,12 +87,25 @@ export function createIngestionRunId() {
 }
 
 export function resolveSourceIds(sourceIds?: string[]) {
-  const ids = sourceIds?.length ? sourceIds : Object.keys(SOURCE_CATALOG)
+  const ids = sourceIds?.length
+    ? sourceIds
+    : Object.values(SOURCE_CATALOG)
+        .filter((source) => source?.workerIngestion !== false)
+        .map((source) => source!.id)
   const uniqueIds = Array.from(new Set(ids))
   const unknownIds = uniqueIds.filter((id) => !SOURCE_CATALOG[id])
 
   if (unknownIds.length > 0) {
     throw new Error(`Unknown ingestion source ids: ${unknownIds.join(', ')}`)
+  }
+
+  const localOnlyIds = uniqueIds.filter(
+    (id) => SOURCE_CATALOG[id]?.workerIngestion === false,
+  )
+  if (localOnlyIds.length > 0) {
+    throw new Error(
+      `Sources require the local release pipeline: ${localOnlyIds.join(', ')}`,
+    )
   }
 
   return uniqueIds

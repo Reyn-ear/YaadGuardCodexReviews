@@ -13,8 +13,16 @@ dist-ssr
 .vinxi
 __unconfig*
 coverage
+!coverage/
+!coverage/caribbean-search-v1.geojson
+!coverage/caribbean-search-v1.manifest.json
+!coverage/jamaica-v1.geojson
+!coverage/jamaica-v1.manifest.json
 test-results
 *.log
 *.tsbuildinfo
 .conductor/
 todos.json
+generated/
+terrain/cache/
+__pycache__/

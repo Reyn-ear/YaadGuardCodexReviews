@@ -1,0 +1,19 @@
+{
+  "coverageId": "caribbean-search-v1",
+  "artifactSlug": "caribbean",
+  "path": "coverage/caribbean-search-v1.geojson",
+  "source": "Natural Earth 1:10m Admin 0 Map Units",
+  "sourceUrl": "https://naturalearth.s3.amazonaws.com/10m_cultural/ne_10m_admin_0_map_units.zip",
+  "derivation": "App Caribbean country and territory set clipped to CARIBBEAN_CAMERA_BOUNDS",
+  "license": "Natural Earth public domain",
+  "crs": "EPSG:4326",
+  "checksum": {
+    "algorithm": "sha256",
+    "value": "32ab295fec5232dde756a76179af9d75dae3bb735877dadfde5ee64dca5b4d36"
+  },
+  "bounds": [-90, 9, -58, 28],
+  "generatedAt": "2026-06-06T20:35:00Z",
+  "featureCount": 29,
+  "territoryPolicy": "Includes the countries and territories represented by CARIBBEAN_COUNTRY_BOUNDARIES that intersect the search boundary. Bermuda is excluded because it is outside CARIBBEAN_CAMERA_BOUNDS.",
+  "offshorePadding": "No analytical padding. Visual tiles include complete intersecting Web Mercator tiles."
+}

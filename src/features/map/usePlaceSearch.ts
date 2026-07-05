@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { useDebouncedValue } from '@tanstack/react-pacer'
 import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query'
-import { searchPlaces } from './search'
+import { findKnownCaribbeanPlaces, searchPlaces } from './search'
 import type { SearchResult } from './types'
 
 const SEARCH_PLACEHOLDER = 'Search regions...'
@@ -49,7 +49,11 @@ export function usePlaceSearch({
   } as const
   const { data: searchResults } = useQuery(searchQueryOptions)
   const activeSearchCount = useIsFetching({ queryKey: [SEARCH_QUERY_KEY] })
-  const suggestions = searchResults ?? EMPTY_SEARCH_RESULTS
+  const immediateFallbackSuggestions =
+    query.trim().length >= 3
+      ? findKnownCaribbeanPlaces(query)
+      : EMPTY_SEARCH_RESULTS
+  const suggestions = searchResults ?? immediateFallbackSuggestions
 
   const updateQuery = useCallback((nextQuery: string) => {
     setQuery(nextQuery)

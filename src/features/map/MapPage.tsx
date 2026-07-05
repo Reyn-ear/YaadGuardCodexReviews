@@ -21,13 +21,14 @@ import { Layer, Map, NavigationControl, Source } from 'react-map-gl/maplibre'
 import type { MapLayerMouseEvent, MapRef } from 'react-map-gl/maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import {
+  CARIBBEAN_CAMERA_BOUNDS,
   DEFAULT_MAP_CENTER,
-  DEFAULT_MAP_ZOOM,
   GRID_FILL_LAYER_ID,
   GRID_LAT_STEP,
   GRID_LNG_STEP,
   GRID_OUTLINE_LAYER_ID,
   GRID_SOURCE_ID,
+  MAP_MAX_BOUNDS,
   MAP_STYLE_URL,
   TERRAIN_EXAGGERATION,
   TERRAIN_HILLSHADE_LAYER_ID,
@@ -464,6 +465,7 @@ export default function MapPage() {
 
           <MapTypeControl
             mode={mapMode}
+            alignLeft={isSidebarOpen}
             statusMessage={terrainStatusMessage}
             onStatusDismiss={() =>
               dispatch({ type: 'terrain-status-dismissed' })
@@ -643,6 +645,7 @@ export default function MapPage() {
               mmPerHr={rainSimulation.mmPerHr}
               onChange={rainSimulation.onRainChange}
               isLoading={rainSimulation.elevationLoading}
+              hasSelection={selectedCellBounds !== null}
               hasElevation={rainSimulation.hasElevation}
             />
 
@@ -1095,17 +1098,22 @@ export default function MapPage() {
 
 function MapTypeControl({
   mode,
+  alignLeft,
   statusMessage,
   onStatusDismiss,
   onModeChange,
 }: {
   mode: MapMode
+  alignLeft: boolean
   statusMessage: string | null
   onStatusDismiss: () => void
   onModeChange: (mode: MapMode) => void
 }) {
   return (
-    <div className="map-type-control" aria-label="Map type">
+    <div
+      className={`map-type-control ${alignLeft ? 'map-type-control--left' : ''}`}
+      aria-label="Map type"
+    >
       <div className="map-type-control__cards">
         {MAP_TYPE_OPTIONS.map((option) => (
           <button
@@ -1326,6 +1334,17 @@ function MapCanvas({
     onTerrainUnavailableRef,
   })
 
+  const updateRegionalMinZoom = () => {
+    const map = getMap()
+    const camera = map?.cameraForBounds(CARIBBEAN_CAMERA_BOUNDS, {
+      padding: 0,
+    })
+
+    if (map && camera?.zoom !== undefined) {
+      map.setMinZoom(camera.zoom)
+    }
+  }
+
   const clearHoverState = () => {
     const map = getMap()
     if (!map || hoveredFeatureIdRef.current === null) {
@@ -1382,10 +1401,6 @@ function MapCanvas({
   )
 
   const handleMapLoad = () => {
-    if (!getMap()) {
-      return
-    }
-
     isReadyRef.current = true
     onFocusReady(focusResult)
   }
@@ -1461,6 +1476,12 @@ function MapCanvas({
     })
   }
 
+  const handleContextMenu = (event: MapLayerMouseEvent) => {
+    event.originalEvent.preventDefault()
+    clearHoverState()
+    clearActiveState()
+  }
+
   useEffect(() => {
     return () => {
       onFocusReady(null)
@@ -1495,16 +1516,20 @@ function MapCanvas({
       <Map
         ref={reactMapRef}
         initialViewState={{
-          longitude: DEFAULT_MAP_CENTER[0],
-          latitude: DEFAULT_MAP_CENTER[1],
-          zoom: DEFAULT_MAP_ZOOM,
+          bounds: CARIBBEAN_CAMERA_BOUNDS,
+          fitBoundsOptions: {
+            padding: 0,
+          },
         }}
+        maxBounds={MAP_MAX_BOUNDS}
         mapStyle={MAP_STYLE_URL}
         onLoad={handleMapLoad}
+        onResize={updateRegionalMinZoom}
         interactiveLayerIds={[GRID_FILL_LAYER_ID]}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         onClick={handleClick}
+        onContextMenu={handleContextMenu}
         style={{ width: '100%', height: '100%', display: 'block' }}
       >
         <NavigationControl position="bottom-right" showCompass={false} />

@@ -341,6 +341,10 @@ a {
   pointer-events: none;
 }
 
+.map-type-control--left {
+  left: 1.25rem;
+}
+
 .map-type-control__cards {
   display: flex;
   gap: 0.55rem;
@@ -971,6 +975,10 @@ a {
     bottom: 1rem;
   }
 
+  .map-type-control--left {
+    left: 1rem;
+  }
+
   .map-page__info-card {
     right: 1rem;
     bottom: 1rem;
@@ -999,6 +1007,13 @@ a {
     bottom: calc(0.625rem + 13.5rem);
     left: auto;
     align-items: flex-end;
+  }
+
+  .map-type-control--left {
+    right: auto;
+    bottom: 0.625rem;
+    left: 0.625rem;
+    align-items: flex-start;
   }
 
   .map-page__info-card {

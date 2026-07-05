@@ -1,7 +1,10 @@
 import { createServerFn } from '@tanstack/react-start'
+import { env } from 'cloudflare:workers'
 import { z } from 'zod'
+import { drizzle } from '../../../db/client'
 import { deriveTileName } from './insightMath'
 import { readGeneratedJson } from './runtimeData.server'
+import { loadActiveElevationGrid } from './terrainRuntime.server'
 import type { BoundsTuple } from './types'
 
 const inputSchema = z.object({
@@ -100,6 +103,18 @@ export const fetchSubGridElevations = createServerFn({ method: 'POST' })
   .inputValidator(inputSchema)
   .handler(async ({ data }) => {
     const { bounds, subGridSize } = data
+    const activeGrid = await loadActiveElevationGrid(
+      bounds,
+      subGridSize,
+      env.DB ? drizzle(env.DB) : null,
+    )
+    if (activeGrid) {
+      return {
+        success: true,
+        ...activeGrid,
+      }
+    }
+
     const grid = await loadGeneratedElevationGrid(bounds, subGridSize)
 
     if (grid) {

@@ -2,7 +2,10 @@ import { drizzle as drizzleD1 } from 'drizzle-orm/d1'
 import { ingestionRuns, ingestionSourceJobs } from './schema/ingestion'
 import { stormHistoryPoints } from './schema/stormHistory'
 import { surgeReturnLevels } from './schema/surgeReturnLevels'
-import { terrainSummaries } from './schema/terrainSummaries'
+import {
+  terrainAnalysisCells,
+  terrainSummaries,
+} from './schema/terrainSummaries'
 import { worldpopCountryPayloads } from './schema/worldpop'
 
 const schema = {
@@ -10,6 +13,7 @@ const schema = {
   ingestionSourceJobs,
   stormHistoryPoints,
   surgeReturnLevels,
+  terrainAnalysisCells,
   terrainSummaries,
   worldpopCountryPayloads,
 }

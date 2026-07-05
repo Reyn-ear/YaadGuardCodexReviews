@@ -19,6 +19,7 @@ export default [
       '.output/**',
       '.wrangler/**',
       'dist/**',
+      'test-results/**',
       'eslint.config.js',
       'prettier.config.js',
     ],

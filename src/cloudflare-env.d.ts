@@ -6,6 +6,7 @@ interface CloudflareBindings {
   INGESTION_QUEUE?: Queue<IngestionQueueMessage>
   INGESTION_ADMIN_TOKEN?: string
   ACTIVE_MANIFEST_KEY?: string
+  TERRAIN_PMTILES_KEY?: string
 }
 
 interface IngestionWorkflowParams {

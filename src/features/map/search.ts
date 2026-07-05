@@ -1,3 +1,7 @@
+import {
+  constrainSearchResult,
+  serializeBoundsForGeocoder,
+} from './cameraBounds'
 import { GEOCODER_ENDPOINT } from './config'
 import type { SearchResult } from './types'
 
@@ -35,7 +39,7 @@ function isPhotonResponse(value: unknown): value is PhotonResponse {
   return typeof value === 'object' && value !== null
 }
 
-function findKnownCaribbeanPlaces(query: string) {
+export function findKnownCaribbeanPlaces(query: string) {
   const normalizedQuery = query.trim().toLowerCase()
 
   if (!normalizedQuery) {
@@ -57,8 +61,7 @@ export async function searchPlaces(query: string): Promise<SearchResult[]> {
   const url = new URL(GEOCODER_ENDPOINT)
   url.searchParams.set('q', trimmedQuery)
   url.searchParams.set('limit', '5')
-  // Restrict search to Latin America and the Caribbean region (minLon, minLat, maxLon, maxLat)
-  url.searchParams.set('bbox', '-118.0,-56.0,-34.0,33.0')
+  url.searchParams.set('bbox', serializeBoundsForGeocoder())
 
   const fallbackResults = findKnownCaribbeanPlaces(trimmedQuery)
 
@@ -92,11 +95,11 @@ export async function searchPlaces(query: string): Promise<SearchResult[]> {
             ]
           : undefined
 
-      return {
+      return constrainSearchResult({
         label: formatLabel(feature),
         center,
         ...(bounds ? { bounds } : {}),
-      }
+      })
     })
 
     const geocoderResults = results.filter(
