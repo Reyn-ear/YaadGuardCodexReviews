@@ -1,9 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { drizzle } from '../../db/client.ts'
-import {
-  worldpopCountryPayloads,
-  type WorldPopRecord,
-} from '../../db/schema/worldpop.ts'
+import type { WorldPopRecord } from '../../db/schema/worldpop.ts'
+import { worldpopCountryPayloads } from '../../db/schema/worldpop.ts'
 import { CARIBBEAN_COUNTRY_BOUNDARIES } from '../../src/features/map/caribbeanCountryBoundaries.ts'
 
 export const WORLDPOP_DATASET_ALIAS = 'G2_CN_POP_2024_100m'
@@ -16,6 +14,7 @@ export async function syncWorldPopMetadata(env: CloudflareBindings) {
   if (!env.DB) {
     throw new Error('Missing Cloudflare D1 binding: DB')
   }
+  const db = env.DB
 
   const countries = CARIBBEAN_COUNTRY_BOUNDARIES.map(({ iso3, name }) => ({
     iso3,
@@ -32,7 +31,7 @@ export async function syncWorldPopMetadata(env: CloudflareBindings) {
         return { iso3: country.iso3, status: 'missing' as const }
       }
 
-      await upsertWorldPopRecord(env, record, country.name)
+      await upsertWorldPopRecord(db, record, country.name)
       return { iso3: country.iso3, status: 'imported' as const }
     }),
   )
@@ -86,7 +85,7 @@ async function fetchWorldPopRecord(iso3: string) {
 }
 
 async function upsertWorldPopRecord(
-  env: CloudflareBindings,
+  db: D1Database,
   record: WorldPopRecord,
   countryName: string,
 ) {
@@ -102,12 +101,8 @@ async function upsertWorldPopRecord(
     throw new Error(`WorldPop record for ${record.iso3} has invalid ids`)
   }
 
-  if (!env.DB) {
-    throw new Error('Missing Cloudflare D1 binding: DB')
-  }
-
   try {
-    await drizzle(env.DB)
+    await drizzle(db)
       .insert(worldpopCountryPayloads)
       .values({
         worldpopId,

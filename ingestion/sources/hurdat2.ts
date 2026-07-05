@@ -25,6 +25,7 @@ export async function importHurdat2StormHistory(
   if (!env.DB) {
     throw new Error('Missing Cloudflare D1 binding: DB')
   }
+  const db = env.DB
 
   const object = await env.YAAD_GUARD_BUCKET?.get(objectKey)
   if (!object) {
@@ -33,9 +34,9 @@ export async function importHurdat2StormHistory(
 
   const rows = parseHurdat2(await object.text()).filter(isCaribbeanStormPoint)
 
-  await env.DB.prepare('DELETE FROM storm_history_points').run()
+  await db.prepare('DELETE FROM storm_history_points').run()
 
-  const insert = env.DB.prepare(`
+  const insert = db.prepare(`
     INSERT INTO storm_history_points (
       storm_id,
       storm_name,
@@ -58,7 +59,7 @@ export async function importHurdat2StormHistory(
 
   await Promise.all(
     chunks.map((chunk) =>
-      env.DB.batch(
+      db.batch(
         chunk.map((row) =>
           insert.bind(
             row.stormId,

@@ -1,7 +1,6 @@
 import type {
   AIInsight,
   BoundsTuple,
-  HistoricalAnalog,
   RegionInsightMetrics,
   RiskBand,
   RiskProfile,

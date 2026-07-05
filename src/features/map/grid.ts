@@ -1,11 +1,10 @@
 import { isPointOnCaribbeanLand } from './geometry'
-import type { GridCellFeature, GridFeatureCollection, LngLatTuple } from './types'
-import {
-  GRID_COLUMNS,
-  GRID_LAT_STEP,
-  GRID_LNG_STEP,
-  GRID_ROWS,
-} from './config'
+import type {
+  GridCellFeature,
+  GridFeatureCollection,
+  LngLatTuple,
+} from './types'
+import { GRID_COLUMNS, GRID_LAT_STEP, GRID_LNG_STEP, GRID_ROWS } from './config'
 
 interface GridOptions {
   center: LngLatTuple
@@ -15,7 +14,7 @@ interface GridOptions {
   lngStep?: number
 }
 
-function getColumnLabel(index: number): string {
+export function getColumnLabel(index: number): string {
   let label = ''
   let current = index
 
@@ -48,10 +47,10 @@ export function createGridFeatureCollection({
       const east = startLng + (col + 1) * lngStep
       const id = row * cols + col
       const cellKey = `${getColumnLabel(col)}${row + 1}`
-      const centerLng = west + lngStep / 2
-      const centerLat = south + latStep / 2
+      const cellCenterLng = west + lngStep / 2
+      const cellCenterLat = south + latStep / 2
 
-      if (!isPointOnCaribbeanLand([centerLng, centerLat])) {
+      if (!isPointOnCaribbeanLand([cellCenterLng, cellCenterLat])) {
         continue
       }
 
@@ -62,8 +61,8 @@ export function createGridFeatureCollection({
           cellId: cellKey,
           cellKey,
           cellLabel: cellKey,
-          centerLng,
-          centerLat,
+          centerLng: cellCenterLng,
+          centerLat: cellCenterLat,
           latIndex: row,
           lngIndex: col,
         },

@@ -18,12 +18,13 @@ export default defineEventHandler(async (event) => {
       })
     }
 
-    const result = await env.DB!.prepare(
-      `SELECT source_id, action, status, message, updated_at
+    const result = await env
+      .DB!.prepare(
+        `SELECT source_id, action, status, message, updated_at
        FROM ingestion_source_jobs
        WHERE run_id = ?
        ORDER BY updated_at`,
-    )
+      )
       .bind(runId)
       .all<{
         source_id: string
@@ -35,7 +36,7 @@ export default defineEventHandler(async (event) => {
 
     return {
       runId,
-      jobs: (result.results ?? []).map((row) => ({
+      jobs: result.results.map((row) => ({
         sourceId: row.source_id,
         action: row.action,
         status: row.status,
@@ -45,20 +46,22 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const result = await env.DB!.prepare(
-    `SELECT run_id, status, source_ids, updated_at
+  const result = await env
+    .DB!.prepare(
+      `SELECT run_id, status, source_ids, updated_at
      FROM ingestion_runs
      ORDER BY updated_at DESC
      LIMIT 10`,
-  ).all<{
-    run_id: string
-    status: string
-    source_ids: string
-    updated_at: string
-  }>()
+    )
+    .all<{
+      run_id: string
+      status: string
+      source_ids: string
+      updated_at: string
+    }>()
 
   return {
-    runs: (result.results ?? []).map((row) => ({
+    runs: result.results.map((row) => ({
       runId: row.run_id,
       status: row.status,
       sourceIds: JSON.parse(row.source_ids) as string[],
@@ -76,7 +79,10 @@ function assertAdmin(event: H3Event) {
     })
   }
 
-  const bearerToken = getHeader(event, 'authorization')?.replace(/^Bearer\s+/i, '')
+  const bearerToken = getHeader(event, 'authorization')?.replace(
+    /^Bearer\s+/i,
+    '',
+  )
   const explicitToken = getHeader(event, 'x-ingestion-token')
 
   if (bearerToken !== configuredToken && explicitToken !== configuredToken) {

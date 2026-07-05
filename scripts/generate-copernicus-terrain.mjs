@@ -37,9 +37,7 @@ const gridSize = Number(
   process.argv.find((arg) => arg.startsWith('--grid-size='))?.slice(12) ?? 120,
 )
 const generationConcurrency = Number(
-  process.argv
-    .find((arg) => arg.startsWith('--concurrency='))
-    ?.slice(14) ?? 1,
+  process.argv.find((arg) => arg.startsWith('--concurrency='))?.slice(14) ?? 1,
 )
 const requestedBounds = process.argv
   .find((arg) => arg.startsWith('--bounds='))
@@ -49,21 +47,31 @@ const requestedBounds = process.argv
 
 // Bounding rectangles mirror the application's supported country/territory list.
 const fullRegions = [
-      [-89.25, 15.85, -87.72, 18.55], [-84.96, 19.6, -74.1, 27.35],
-      [-81.45, 19.15, -79.65, 19.85], [-74.55, 17.45, -65.2, 22],
-      [-78.45, 17.6, -76.1, 18.55],
-      [-70.12, 12, -68.15, 12.65], [-67.35, 17.65, -62.4, 18.8],
-      [-64.95, 32.15, -64.55, 32.45], [-63.43, 16.65, -60.78, 18.65],
-      [-61.95, 10, -59.4, 16.55],
-    ]
+  [-89.25, 15.85, -87.72, 18.55],
+  [-84.96, 19.6, -74.1, 27.35],
+  [-81.45, 19.15, -79.65, 19.85],
+  [-74.55, 17.45, -65.2, 22],
+  [-78.45, 17.6, -76.1, 18.55],
+  [-70.12, 12, -68.15, 12.65],
+  [-67.35, 17.65, -62.4, 18.8],
+  [-64.95, 32.15, -64.55, 32.45],
+  [-63.43, 16.65, -60.78, 18.65],
+  [-61.95, 10, -59.4, 16.55],
+]
 const regions = requestedBounds
   ? [requestedBounds]
   : smokeTest
     ? [[-77.05, 17.95, -76.95, 18.05]]
     : fullRegions
 
-if (!Number.isInteger(minZoom) || !Number.isInteger(maxZoom) || minZoom > maxZoom) {
-  throw new Error('Zooms must be integers and min-zoom must not exceed max-zoom')
+if (
+  !Number.isInteger(minZoom) ||
+  !Number.isInteger(maxZoom) ||
+  minZoom > maxZoom
+) {
+  throw new Error(
+    'Zooms must be integers and min-zoom must not exceed max-zoom',
+  )
 }
 
 if (!Number.isInteger(generationConcurrency) || generationConcurrency < 1) {
@@ -80,15 +88,35 @@ if (
   throw new Error('Bounds must be west,south,east,north')
 }
 
-await run('bash', [join(dirname(new URL(import.meta.url).pathname), 'validate-copernicus-source.sh'), sourceDir])
+await run('bash', [
+  join(
+    dirname(new URL(import.meta.url).pathname),
+    'validate-copernicus-source.sh',
+  ),
+  sourceDir,
+])
 await mkdir(output, { recursive: true })
 const temporary = await mkdtemp(join(tmpdir(), 'copernicus-terrain-'))
 
 async function warp(bounds, width, height, target, srs) {
   await run('gdalwarp', [
-    '-q', '-overwrite', '-t_srs', srs, '-te', ...bounds.map(String),
-    '-ts', String(width), String(height), '-r', 'bilinear',
-    '-ot', 'Float32', '-dstnodata', '-9999', vrt, target,
+    '-q',
+    '-overwrite',
+    '-t_srs',
+    srs,
+    '-te',
+    ...bounds.map(String),
+    '-ts',
+    String(width),
+    String(height),
+    '-r',
+    'bilinear',
+    '-ot',
+    'Float32',
+    '-dstnodata',
+    '-9999',
+    vrt,
+    target,
   ])
 }
 
@@ -117,7 +145,9 @@ async function generateTile(z, x, y) {
   if (!hasData) return false
   const target = join(output, 'tiles', String(z), String(x), `${y}.png`)
   await mkdir(dirname(target), { recursive: true })
-  await sharp(rgb, { raw: { width: TILE_SIZE, height: TILE_SIZE, channels: 3 } })
+  await sharp(rgb, {
+    raw: { width: TILE_SIZE, height: TILE_SIZE, channels: 3 },
+  })
     .png({ compressionLevel: 9, palette: false })
     .toFile(target)
   return true
@@ -128,7 +158,9 @@ async function generateElevationGrid(lon, lat) {
   await warp([lon, lat, lon + 1, lat + 1], gridSize, gridSize, tif, 'EPSG:4326')
   const values = await readFloatRaster(tif, gridSize, gridSize)
   const elevations = Array.from(values, (value) =>
-    Number.isFinite(value) && value > -9990 ? Math.round(value * 10) / 10 : null,
+    Number.isFinite(value) && value > -9990
+      ? Math.round(value * 10) / 10
+      : null,
   )
   const valid = elevations.filter((value) => value !== null)
   if (valid.length === 0) return false
@@ -137,7 +169,10 @@ async function generateElevationGrid(lon, lat) {
     elevations,
     width: gridSize,
     height: gridSize,
-    bounds: [[lon, lat], [lon + 1, lat + 1]],
+    bounds: [
+      [lon, lat],
+      [lon + 1, lat + 1],
+    ],
     noDataValue: null,
   }
   await mkdir(join(output, 'elevation-grids'), { recursive: true })
@@ -150,9 +185,15 @@ async function generateElevationGrid(lon, lat) {
     stats: {
       min: Math.min(...valid),
       max: Math.max(...valid),
-      mean: Math.round((valid.reduce((sum, value) => sum + value, 0) / valid.length) * 10) / 10,
+      mean:
+        Math.round(
+          (valid.reduce((sum, value) => sum + value, 0) / valid.length) * 10,
+        ) / 10,
     },
-    coverage: { landCoveragePct: Math.round((valid.length / elevations.length) * 1000) / 10 },
+    coverage: {
+      landCoveragePct:
+        Math.round((valid.length / elevations.length) * 1000) / 10,
+    },
   }
   await mkdir(join(output, 'terrain-summaries'), { recursive: true })
   await writeFile(
@@ -190,10 +231,13 @@ try {
       }
     }
   }
-  const generatedTiles = await processWithConcurrency([...tiles], async (key) => {
-    const [z, x, y] = key.split('/').map(Number)
-    return generateTile(z, x, y)
-  })
+  const generatedTiles = await processWithConcurrency(
+    [...tiles],
+    async (key) => {
+      const [z, x, y] = key.split('/').map(Number)
+      return generateTile(z, x, y)
+    },
+  )
 
   const gridCells = new Set()
   for (const [west, south, east, north] of regions) {
@@ -206,18 +250,23 @@ try {
   const generatedGrids = await processWithConcurrency(
     [...gridCells],
     async (key) => {
-    const [lon, lat] = key.split('/').map(Number)
+      const [lon, lat] = key.split('/').map(Number)
       return generateElevationGrid(lon, lat)
     },
   )
 
   await mkdir(join(output, 'provenance'), { recursive: true })
-  await cp(join(sourceDir, 'source-manifest.json'), join(output, 'provenance/source-manifest.json'))
+  await cp(
+    join(sourceDir, 'source-manifest.json'),
+    join(output, 'provenance/source-manifest.json'),
+  )
   await writeFile(
     join(output, 'provenance/build-configuration.json'),
     `${JSON.stringify({ minZoom, maxZoom, tileSize: TILE_SIZE, gridSize, smokeTest, generationConcurrency, generatedTiles, generatedGrids }, null, 2)}\n`,
   )
-  console.log(`Generated ${generatedTiles} PNG tiles and ${generatedGrids} elevation grids at ${output}`)
+  console.log(
+    `Generated ${generatedTiles} PNG tiles and ${generatedGrids} elevation grids at ${output}`,
+  )
 } finally {
   await rm(temporary, { recursive: true, force: true })
 }

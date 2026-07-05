@@ -1,3 +1,17 @@
 package-lock.json
 pnpm-lock.yaml
 yarn.lock
+node_modules
+dist
+dist-ssr
+.nitro
+.tanstack
+.wrangler
+.output
+.vinxi
+.playwright-mcp
+coverage
+test-results
+terrain/cache
+*.log
+*.tsbuildinfo

@@ -99,6 +99,7 @@ export async function enqueueIngestionJobs(
   if (!env.INGESTION_QUEUE) {
     throw new Error('Missing Cloudflare Queue binding: INGESTION_QUEUE')
   }
+  const ingestionQueue = env.INGESTION_QUEUE
 
   await Promise.all([
     writeRunManifest(env, runId, ids, requestedBy),
@@ -120,7 +121,7 @@ export async function enqueueIngestionJobs(
         status: 'queued',
         sourceVersion: source.sourceVersion,
       })
-      await env.INGESTION_QUEUE.send({ runId, sourceId, action })
+      await ingestionQueue.send({ runId, sourceId, action })
     }),
   )
 

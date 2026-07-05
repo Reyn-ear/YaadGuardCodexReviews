@@ -21,7 +21,11 @@ export function useRainSimulation(selectedCellBounds: BoundsTuple | null) {
         data: { bounds: selectedCellBounds, subGridSize: SUB_GRID_SIZE },
       })
 
-      return result.success ? result.elevations : null
+      return result.success
+        ? result.elevations.filter(
+            (elevation): elevation is number => elevation !== null,
+          )
+        : null
     },
     enabled: selectedCellBounds !== null,
     staleTime: ELEVATION_STALE_TIME_MS,

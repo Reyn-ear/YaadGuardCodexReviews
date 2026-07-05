@@ -20,19 +20,11 @@ describe('terrain artifact encoding', () => {
 
   it('extracts one elevation per pixel from expanded RGB float rasters', () => {
     const expanded = new Float32Array([
-      100, 100, 100,
-      200, 200, 200,
-      300, 300, 300,
+      100, 100, 100, 200, 200, 200, 300, 300, 300,
     ])
 
     expect(
-      Array.from(
-        extractFirstFloatChannel(
-          Buffer.from(expanded.buffer),
-          3,
-          3,
-        ),
-      ),
+      Array.from(extractFirstFloatChannel(Buffer.from(expanded.buffer), 3, 3)),
     ).toEqual([100, 200, 300])
   })
 })

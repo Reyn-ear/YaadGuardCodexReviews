@@ -44,12 +44,13 @@ export async function importSurgeReturnLevels(
   if (!env.DB) {
     throw new Error('Missing Cloudflare D1 binding: DB')
   }
+  const db = env.DB
 
   const { surgeRows } = surgeProcessorSchema.parse(processorResult)
 
-  await env.DB.prepare('DELETE FROM surge_return_levels').run()
+  await db.prepare('DELETE FROM surge_return_levels').run()
 
-  const statement = env.DB.prepare(
+  const statement = db.prepare(
     `
       INSERT INTO surge_return_levels (
         station_id,
@@ -95,7 +96,7 @@ export async function importSurgeReturnLevels(
 
   await Promise.all(
     chunks.map((chunk) =>
-      env.DB.batch(
+      db.batch(
         chunk.map((row) =>
           statement.bind(
             row.stationId,

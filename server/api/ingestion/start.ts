@@ -50,7 +50,10 @@ function assertAdmin(event: H3Event) {
     })
   }
 
-  const bearerToken = getHeader(event, 'authorization')?.replace(/^Bearer\s+/i, '')
+  const bearerToken = getHeader(event, 'authorization')?.replace(
+    /^Bearer\s+/i,
+    '',
+  )
   const explicitToken = getHeader(event, 'x-ingestion-token')
 
   if (bearerToken !== configuredToken && explicitToken !== configuredToken) {

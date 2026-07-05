@@ -13,13 +13,12 @@ import {
 } from 'lucide-react'
 import { AnimatePresence, MotionConfig } from 'motion/react'
 import type { FeatureCollection, Polygon } from 'geojson'
-import { Layer, Map, NavigationControl, Source } from 'react-map-gl/maplibre'
 import type {
-  FillLayer,
-  LineLayer,
-  MapLayerMouseEvent,
-  MapRef,
-} from 'react-map-gl/maplibre'
+  FillLayerSpecification,
+  LineLayerSpecification,
+} from 'maplibre-gl'
+import { Layer, Map, NavigationControl, Source } from 'react-map-gl/maplibre'
+import type { MapLayerMouseEvent, MapRef } from 'react-map-gl/maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import {
   DEFAULT_MAP_CENTER,
@@ -174,7 +173,7 @@ const MAP_TYPE_OPTIONS: Array<{ mode: MapMode; label: string }> = [
 const REGION_INSIGHTS_STALE_TIME_MS = 10 * 60 * 1000
 const REGION_INSIGHTS_GC_TIME_MS = 30 * 60 * 1000
 
-const GRID_FILL_LAYER: FillLayer = {
+const GRID_FILL_LAYER: FillLayerSpecification = {
   id: GRID_FILL_LAYER_ID,
   type: 'fill',
   source: GRID_SOURCE_ID,
@@ -191,7 +190,7 @@ const GRID_FILL_LAYER: FillLayer = {
   },
 }
 
-const GRID_OUTLINE_LAYER: LineLayer = {
+const GRID_OUTLINE_LAYER: LineLayerSpecification = {
   id: GRID_OUTLINE_LAYER_ID,
   type: 'line',
   source: GRID_SOURCE_ID,
@@ -212,7 +211,7 @@ const GRID_OUTLINE_LAYER: LineLayer = {
   },
 }
 
-const TERRAIN_GRID_OUTLINE_LAYER: LineLayer = {
+const TERRAIN_GRID_OUTLINE_LAYER: LineLayerSpecification = {
   ...GRID_OUTLINE_LAYER,
   paint: {
     ...GRID_OUTLINE_LAYER.paint,
@@ -227,7 +226,7 @@ const TERRAIN_GRID_OUTLINE_LAYER: LineLayer = {
   },
 }
 
-const WATER_FILL_LAYER: FillLayer = {
+const WATER_FILL_LAYER: FillLayerSpecification = {
   id: WATER_FILL_LAYER_ID,
   type: 'fill',
   source: WATER_SOURCE_ID,
@@ -1005,38 +1004,22 @@ export default function MapPage() {
                         Community Context
                       </p>
                       <div className="mt-3 bg-slate-800/50 p-3 rounded-md border border-slate-700/50 text-sm text-slate-300">
-                        {panelState.insight.metrics.populationDensityPerSqKm !==
-                          undefined ||
-                        panelState.insight.metrics.estimatedPopulation !==
-                          undefined ? (
-                          <div className="flex flex-col gap-2">
-                            {panelState.insight.metrics.estimatedPopulation !==
-                            undefined ? (
-                              <p>
-                                <strong>Estimated Population:</strong>{' '}
-                                {panelState.insight.metrics.estimatedPopulation.toLocaleString()}{' '}
-                                people inside this analysis window.
-                              </p>
-                            ) : null}
-                            {panelState.insight.metrics
-                              .populationDensityPerSqKm !== undefined ? (
-                              <p>
-                                <strong>Population Density:</strong>{' '}
-                                {
-                                  panelState.insight.metrics
-                                    .populationDensityPerSqKm
-                                }{' '}
-                                per sq km. Denser areas can increase exposure
-                                and strain evacuation routes during a disaster.
-                              </p>
-                            ) : null}
-                          </div>
-                        ) : (
+                        <div className="flex flex-col gap-2">
                           <p>
-                            Local population density data is currently
-                            unavailable for this specific grid area.
+                            <strong>Estimated Population:</strong>{' '}
+                            {panelState.insight.metrics.estimatedPopulation !==
+                            undefined
+                              ? `${panelState.insight.metrics.estimatedPopulation.toLocaleString()} people inside this analysis window.`
+                              : 'N/A'}
                           </p>
-                        )}
+                          <p>
+                            <strong>Population Density:</strong>{' '}
+                            {panelState.insight.metrics
+                              .populationDensityPerSqKm !== undefined
+                              ? `${panelState.insight.metrics.populationDensityPerSqKm} per sq km. Denser areas can increase exposure and strain evacuation routes during a disaster.`
+                              : 'N/A'}
+                          </p>
+                        </div>
                       </div>
                     </m.div>
 
@@ -1052,46 +1035,51 @@ export default function MapPage() {
                         Land-Cover Context
                       </p>
                       <div className="mt-3 bg-slate-800/50 p-3 rounded-md border border-slate-700/50">
-                        {panelState.insight.metrics.builtUpPct !== undefined ||
-                        panelState.insight.metrics.treeCoverPct !== undefined ||
-                        panelState.insight.metrics.waterPct !== undefined ? (
-                          <div className="grid grid-cols-3 gap-3 text-sm">
-                            <div>
-                              <span className="text-xs text-slate-400 block mb-1">
-                                Built-up
-                              </span>
-                              <strong className="text-base text-white">
-                                {panelState.insight.metrics.builtUpPct ?? 0}%
-                              </strong>
-                            </div>
-                            <div>
-                              <span className="text-xs text-slate-400 block mb-1">
-                                Tree Cover
-                              </span>
-                              <strong className="text-base text-white">
-                                {panelState.insight.metrics.treeCoverPct ?? 0}%
-                              </strong>
-                            </div>
-                            <div>
-                              <span className="text-xs text-slate-400 block mb-1">
-                                Water/Wetland
-                              </span>
-                              <strong className="text-base text-white">
-                                {(
-                                  (panelState.insight.metrics.waterPct ?? 0) +
-                                  (panelState.insight.metrics.wetlandPct ?? 0) +
-                                  (panelState.insight.metrics.mangrovePct ?? 0)
-                                ).toFixed(1)}
-                                %
-                              </strong>
-                            </div>
+                        <div className="grid grid-cols-3 gap-3 text-sm">
+                          <div>
+                            <span className="text-xs text-slate-400 block mb-1">
+                              Built-up
+                            </span>
+                            <strong className="text-base text-white">
+                              {panelState.insight.metrics.builtUpPct !==
+                              undefined
+                                ? `${panelState.insight.metrics.builtUpPct}%`
+                                : 'N/A'}
+                            </strong>
                           </div>
-                        ) : (
-                          <p className="text-sm text-slate-300">
-                            ESA WorldCover data is currently unavailable for
-                            this specific analysis window.
-                          </p>
-                        )}
+                          <div>
+                            <span className="text-xs text-slate-400 block mb-1">
+                              Tree Cover
+                            </span>
+                            <strong className="text-base text-white">
+                              {panelState.insight.metrics.treeCoverPct !==
+                              undefined
+                                ? `${panelState.insight.metrics.treeCoverPct}%`
+                                : 'N/A'}
+                            </strong>
+                          </div>
+                          <div>
+                            <span className="text-xs text-slate-400 block mb-1">
+                              Water/Wetland
+                            </span>
+                            <strong className="text-base text-white">
+                              {panelState.insight.metrics.waterPct !==
+                                undefined ||
+                              panelState.insight.metrics.wetlandPct !==
+                                undefined ||
+                              panelState.insight.metrics.mangrovePct !==
+                                undefined
+                                ? `${(
+                                    (panelState.insight.metrics.waterPct ?? 0) +
+                                    (panelState.insight.metrics.wetlandPct ??
+                                      0) +
+                                    (panelState.insight.metrics.mangrovePct ??
+                                      0)
+                                  ).toFixed(1)}%`
+                                : 'N/A'}
+                            </strong>
+                          </div>
+                        </div>
                       </div>
                     </m.div>
                   </m.div>

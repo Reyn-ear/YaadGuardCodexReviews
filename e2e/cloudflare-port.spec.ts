@@ -4,7 +4,7 @@ test('Cloudflare port renders the core map workflow without Winston chat', async
   page,
 }) => {
   test.setTimeout(120_000)
-  const baseUrl = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:3000'
+  const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3000'
 
   await page.goto(baseUrl)
 
