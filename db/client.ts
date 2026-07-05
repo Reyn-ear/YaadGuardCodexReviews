@@ -1,38 +1,21 @@
-import { drizzle } from 'drizzle-orm/d1'
-import { env } from 'cloudflare:workers'
-import * as schema from './schema'
+import { drizzle as drizzleD1 } from 'drizzle-orm/d1'
+import { ingestionRuns, ingestionSourceJobs } from './schema/ingestion'
+import { stormHistoryPoints } from './schema/stormHistory'
+import { surgeReturnLevels } from './schema/surgeReturnLevels'
+import { terrainSummaries } from './schema/terrainSummaries'
+import { worldpopCountryPayloads } from './schema/worldpop'
 
-type D1Client = ReturnType<typeof drizzle<typeof schema>>
-
-let cachedDb: D1Client | null = null
-
-function resolveD1Binding(database?: D1Database) {
-  const binding = database ?? (env as Partial<CloudflareBindings>).DB
-
-  if (!binding) {
-    throw new Error('Missing Cloudflare D1 binding: DB')
-  }
-
-  return binding
+const schema = {
+  ingestionRuns,
+  ingestionSourceJobs,
+  stormHistoryPoints,
+  surgeReturnLevels,
+  terrainSummaries,
+  worldpopCountryPayloads,
 }
 
-export function createDb(database?: D1Database) {
-  return drizzle(resolveD1Binding(database), { schema })
+export type Db = ReturnType<typeof drizzle>
+
+export function drizzle(database: D1Database) {
+  return drizzleD1(database, { schema })
 }
-
-export function getDb(database?: D1Database) {
-  if (database) {
-    return createDb(database)
-  }
-
-  cachedDb ??= createDb()
-  return cachedDb
-}
-
-export const db = new Proxy({} as D1Client, {
-  get(_target, property, receiver) {
-    return Reflect.get(getDb(), property, receiver)
-  },
-})
-
-export { schema }

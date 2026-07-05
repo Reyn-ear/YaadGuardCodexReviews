@@ -1,8 +1,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
-import { processDemElevationGrid } from './demProcessor.server'
 import { deriveTileName } from './insightMath'
-import { readGeneratedJson, writeGeneratedObject } from './runtimeData.server'
+import { readGeneratedJson } from './runtimeData.server'
 import type { BoundsTuple } from './types'
 
 const inputSchema = z.object({
@@ -14,10 +13,48 @@ const inputSchema = z.object({
 })
 
 const elevationGridSchema = z.object({
-  elevations: z.array(z.number()),
+  elevations: z.array(z.number().nullable()),
   subGridSize: z.number().min(1).max(100).optional(),
   bounds: inputSchema.shape.bounds.optional(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
 })
+
+function sampleIndexedGrid(
+  grid: z.infer<typeof elevationGridSchema>,
+  requestedBounds: BoundsTuple,
+  subGridSize: number,
+) {
+  if (!grid.bounds || !grid.width || !grid.height) return undefined
+  const [[gridWest, gridSouth], [gridEast, gridNorth]] = grid.bounds
+  const [[west, south], [east, north]] = requestedBounds
+  const elevations: number[] = []
+
+  for (let row = 0; row < subGridSize; row += 1) {
+    const lat = north - ((row + 0.5) / subGridSize) * (north - south)
+    const sourceRow = Math.max(
+      0,
+      Math.min(
+        grid.height - 1,
+        Math.floor(((gridNorth - lat) / (gridNorth - gridSouth)) * grid.height),
+      ),
+    )
+    for (let column = 0; column < subGridSize; column += 1) {
+      const lng = west + ((column + 0.5) / subGridSize) * (east - west)
+      const sourceColumn = Math.max(
+        0,
+        Math.min(
+          grid.width - 1,
+          Math.floor(((lng - gridWest) / (gridEast - gridWest)) * grid.width),
+        ),
+      )
+      elevations.push(
+        grid.elevations[sourceRow * grid.width + sourceColumn] ?? 0,
+      )
+    }
+  }
+  return elevations
+}
 
 function gridCellKey(bounds: BoundsTuple, subGridSize: number) {
   const [[west, south], [east, north]] = bounds
@@ -44,11 +81,16 @@ async function loadGeneratedElevationGrid(
     `terrain-grids/${tileName}/${key}.json`,
   ]
 
-  for (const candidate of candidates) {
-    const payload = await readGeneratedJson(candidate, elevationGridSchema)
-    if (payload) {
-      return payload
-    }
+  const payloads = await Promise.all(
+    candidates.map((candidate) =>
+      readGeneratedJson(candidate, elevationGridSchema),
+    ),
+  )
+  const payload = payloads.find((candidatePayload) => candidatePayload)
+
+  if (payload) {
+    const sampled = sampleIndexedGrid(payload, bounds, subGridSize)
+    return sampled ? { elevations: sampled, subGridSize, bounds } : payload
   }
 
   return undefined
@@ -69,28 +111,9 @@ export const fetchSubGridElevations = createServerFn({ method: 'POST' })
       }
     }
 
-    const processedGrid = await processDemElevationGrid(bounds, subGridSize)
-
-    if (!processedGrid) {
-      return {
-        success: false,
-        error: 'Generated elevation grid not found',
-        elevations: [],
-      }
-    }
-
-    const { center, key } = gridCellKey(bounds, subGridSize)
-    const tileName = deriveTileName(center)
-    await writeGeneratedObject(
-      `elevation-grids/${tileName}/${key}.json`,
-      JSON.stringify(processedGrid),
-      { httpMetadata: { contentType: 'application/json' } },
-    )
-
     return {
-      success: true,
-      elevations: processedGrid.elevations,
-      subGridSize: processedGrid.subGridSize,
-      bounds: processedGrid.bounds,
+      success: false,
+      error: 'Generated elevation grid not found',
+      elevations: [],
     }
   })

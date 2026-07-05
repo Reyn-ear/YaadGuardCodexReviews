@@ -9,7 +9,7 @@ import {
   GRID_ROWS,
 } from './config'
 import { isPointOnCaribbeanLand } from './geometry'
-import { createGridFeatureCollection } from './grid'
+import { createGridFeatureCollection, getColumnLabel } from './grid'
 
 describe('createGridFeatureCollection', () => {
   it('uses the 100 by 100 grid with the original cell size', () => {
@@ -22,13 +22,10 @@ describe('createGridFeatureCollection', () => {
   })
 
   it('keeps column labels unique past Z', () => {
-    const grid = createGridFeatureCollection({ center: DEFAULT_MAP_CENTER })
-    const labels = new Set(grid.features.map((feature) => feature.properties.cellId))
-
-    expect(labels.has('A1')).toBe(true)
-    expect(labels.has('Z1')).toBe(true)
-    expect(labels.has('AA1')).toBe(true)
-    expect(labels.has('CV1')).toBe(true)
+    expect(getColumnLabel(0)).toBe('A')
+    expect(getColumnLabel(25)).toBe('Z')
+    expect(getColumnLabel(26)).toBe('AA')
+    expect(getColumnLabel(99)).toBe('CV')
   })
 
   it('filters out cells whose centers are outside the coarse land mask', () => {

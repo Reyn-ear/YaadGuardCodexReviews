@@ -4,7 +4,6 @@ interface CloudflareBindings {
   YAAD_GUARD_BUCKET?: R2Bucket
   DATASET_INGESTION?: Workflow<IngestionWorkflowParams>
   INGESTION_QUEUE?: Queue<IngestionQueueMessage>
-  GEOSPATIAL_PROCESSOR?: DurableObjectNamespace
   INGESTION_ADMIN_TOKEN?: string
   ACTIVE_MANIFEST_KEY?: string
 }

@@ -21,7 +21,11 @@ function getAdvisory(panelState: PanelState, mmPerHr: number) {
   if (panelState.status === 'ready') {
     const riskBand = panelState.insight.riskProfile.band
 
-    if (mmPerHr >= THRESHOLD_MM_PER_HR || riskBand === 'Severe' || riskBand === 'High') {
+    if (
+      mmPerHr >= THRESHOLD_MM_PER_HR ||
+      riskBand === 'Severe' ||
+      riskBand === 'High'
+    ) {
       return 'This region is prone to flooding. If rainfall exceeds 50 mm/hour, evacuation may be needed.'
     }
 
@@ -59,7 +63,11 @@ function getRiskLabel(panelState: PanelState) {
   return 'Overview'
 }
 
-export function InfoCard({ panelState, mmPerHr, onDetailsClick }: InfoCardProps) {
+export function InfoCard({
+  panelState,
+  mmPerHr,
+  onDetailsClick,
+}: InfoCardProps) {
   return (
     <article className="map-page__info-card" aria-live="polite">
       <div className="map-page__info-card-header">
@@ -67,7 +75,9 @@ export function InfoCard({ panelState, mmPerHr, onDetailsClick }: InfoCardProps)
           <p className="map-page__eyebrow">Flood outlook</p>
           <h2>{getRiskLabel(panelState)}</h2>
         </div>
-        <span className="map-page__info-card-pill">{getRiskLabel(panelState)}</span>
+        <span className="map-page__info-card-pill">
+          {getRiskLabel(panelState)}
+        </span>
       </div>
 
       <p className="map-page__info-rainfall">

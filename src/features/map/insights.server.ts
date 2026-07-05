@@ -1,3 +1,5 @@
+import { env } from 'cloudflare:workers'
+import { drizzle } from '../../../db/client.ts'
 import { regionInsightResponseSchema } from './contracts'
 import {
   aggregateStorms,
@@ -24,6 +26,7 @@ export async function calculateRegionInsights(
   const confidenceNotes: string[] = []
   const analysisBounds = resolveAnalysisBounds(input)
   const analysisAreaSqKm = estimateBoundsAreaSqKm(analysisBounds)
+  const db = env.DB ? drizzle(env.DB) : null
 
   const [
     terrainResult,
@@ -32,10 +35,10 @@ export async function calculateRegionInsights(
     populationData,
     landCoverData,
   ] = await Promise.all([
-    loadTerrainSummary(input.center, analysisBounds).catch(() => undefined),
-    loadNearestSurgeStation(input.center).catch(() => null),
-    loadStormRows(input.center).catch(() => []),
-    loadPopulationData(input.center, analysisBounds).catch(() => undefined),
+    loadTerrainSummary(input.center, db).catch(() => undefined),
+    loadNearestSurgeStation(input.center, db).catch(() => null),
+    loadStormRows(input.center, db).catch(() => []),
+    loadPopulationData(input.center, analysisBounds, db).catch(() => undefined),
     loadLandCoverData(input.center, analysisBounds).catch(() => undefined),
   ])
 

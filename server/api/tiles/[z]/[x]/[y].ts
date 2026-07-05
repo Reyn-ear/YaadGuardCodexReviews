@@ -13,8 +13,8 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  const yClean = y.replace(/\.png$/i, '')
-  const key = `tiles/${z}/${x}/${yClean}.png`
+  const yClean = y.replace(/\.(?:png|webp)$/i, '')
+  const key = `tiles/${z}/${x}/${yClean}.webp`
   const tile = await readGeneratedObject(key)
 
   if (!tile?.body) {
@@ -27,8 +27,8 @@ export default defineEventHandler(async (event) => {
   return new Response(tile.body, {
     headers: {
       'Access-Control-Allow-Origin': '*',
-      'Cache-Control': 'public, max-age=3600',
-      'Content-Type': tile.httpMetadata?.contentType ?? 'image/png',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Content-Type': tile.httpMetadata?.contentType ?? 'image/webp',
     },
   })
 })

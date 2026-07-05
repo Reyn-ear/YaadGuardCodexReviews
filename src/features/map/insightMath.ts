@@ -1,7 +1,6 @@
 import type {
   AIInsight,
   BoundsTuple,
-  HistoricalAnalog,
   RegionInsightMetrics,
   RiskBand,
   RiskProfile,
@@ -69,7 +68,7 @@ export function round(value: number, digits = 1) {
   return Math.round(value * factor) / factor
 }
 
-export function toRadians(value: number) {
+function toRadians(value: number) {
   return (value * Math.PI) / 180
 }
 
@@ -337,26 +336,6 @@ export function buildDeterministicInsight(input: {
           )
         : undefined,
   }
-}
-
-export function formatHistoricalAnalog(analog: HistoricalAnalog | undefined) {
-  if (!analog) {
-    return undefined
-  }
-
-  const parts = [
-    `${analog.label} passed within ${round(analog.closestApproachKm)} km`,
-  ]
-
-  if (analog.peakWindKt !== undefined) {
-    parts.push(`with peak nearby winds of ${analog.peakWindKt} kt`)
-  }
-
-  if (analog.eventDate) {
-    parts.push(`on ${analog.eventDate}`)
-  }
-
-  return `${parts.join(' ')}.`
 }
 
 function buildTerrainContribution(

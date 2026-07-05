@@ -7,6 +7,7 @@ interface Props {
   mmPerHr: number
   onChange: (mmPerHr: number) => void
   isLoading: boolean
+  hasSelection: boolean
   hasElevation: boolean
 }
 
@@ -14,11 +15,12 @@ export function RainControls({
   mmPerHr,
   onChange,
   isLoading,
+  hasSelection,
   hasElevation,
 }: Props) {
   const category = getCategory(mmPerHr)
 
-  if (!hasElevation) {
+  if (!hasSelection) {
     return (
       <div className="rain-controls rain-controls--idle">
         <Droplets size={16} aria-hidden="true" />
@@ -32,6 +34,15 @@ export function RainControls({
       <div className="rain-controls rain-controls--idle">
         <Droplets size={16} aria-hidden="true" className="is-spinning" />
         <span>Loading elevation data...</span>
+      </div>
+    )
+  }
+
+  if (!hasElevation) {
+    return (
+      <div className="rain-controls rain-controls--idle">
+        <Droplets size={16} aria-hidden="true" />
+        <span>Elevation data is unavailable for this grid cell</span>
       </div>
     )
   }
@@ -57,9 +68,7 @@ export function RainControls({
           max={MAX_MM}
           step={1}
           value={mmPerHr}
-          onChange={(e) =>
-            onChange(Number((e.target as HTMLInputElement).value))
-          }
+          onChange={(e) => onChange(Number(e.target.value))}
           className="rain-controls__slider"
           aria-label="Rainfall intensity"
         />

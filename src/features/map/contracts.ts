@@ -1,8 +1,8 @@
 import { z } from 'zod'
 
-export const lngLatSchema = z.tuple([z.number(), z.number()])
+const lngLatSchema = z.tuple([z.number(), z.number()])
 
-export const boundsSchema = z.tuple([lngLatSchema, lngLatSchema])
+const boundsSchema = z.tuple([lngLatSchema, lngLatSchema])
 
 export const regionInsightInputSchema = z.object({
   kind: z.enum(['cell', 'search']),
@@ -12,7 +12,7 @@ export const regionInsightInputSchema = z.object({
   gridCellId: z.string().trim().min(1).nullable().optional(),
 })
 
-export const aiInsightSchema = z.object({
+const aiInsightSchema = z.object({
   headline: z.string().trim().min(1).max(160),
   explanation: z.string().trim().min(1).max(320),
   caution: z.string().trim().min(1).max(220).optional(),

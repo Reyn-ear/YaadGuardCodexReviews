@@ -6,7 +6,7 @@ import {
   createIngestionRunId,
   enqueueIngestionJobs,
   resolveSourceIds,
-} from '../../../src/features/ingestion/ingestion.server'
+} from '../../../ingestion/orchestration.ts'
 
 const requestSchema = z.object({
   runId: z.string().trim().min(1).optional(),
@@ -14,21 +14,20 @@ const requestSchema = z.object({
 })
 
 export default defineEventHandler(async (event) => {
+  if (event.method !== 'POST') {
+    throw createError({ statusCode: 405, statusMessage: 'Method Not Allowed' })
+  }
+
   assertAdmin(event)
 
   const body = requestSchema.parse(await readBody(event).catch(() => ({})))
   const sourceIds = resolveSourceIds(body.sourceIds)
   const runId = body.runId ?? createIngestionRunId()
-  const cloudflareEnv = env as CloudflareBindings
 
-  if (cloudflareEnv.DATASET_INGESTION) {
-    const instance = await cloudflareEnv.DATASET_INGESTION.create({
+  if (env.DATASET_INGESTION) {
+    const instance = await env.DATASET_INGESTION.create({
       id: runId,
-      params: {
-        runId,
-        sourceIds,
-        requestedBy: 'api',
-      },
+      params: { runId, sourceIds, requestedBy: 'api' },
     })
 
     return {
@@ -39,12 +38,11 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  return enqueueIngestionJobs(cloudflareEnv, runId, sourceIds, 'api')
+  return enqueueIngestionJobs(env, runId, sourceIds, 'api')
 })
 
 function assertAdmin(event: H3Event) {
-  const configuredToken = (env as Partial<CloudflareBindings>)
-    .INGESTION_ADMIN_TOKEN
+  const configuredToken = env.INGESTION_ADMIN_TOKEN
   if (!configuredToken) {
     throw createError({
       statusCode: 503,
@@ -52,8 +50,10 @@ function assertAdmin(event: H3Event) {
     })
   }
 
-  const authHeader = getHeader(event, 'authorization')
-  const bearerToken = authHeader?.replace(/^Bearer\s+/i, '')
+  const bearerToken = getHeader(event, 'authorization')?.replace(
+    /^Bearer\s+/i,
+    '',
+  )
   const explicitToken = getHeader(event, 'x-ingestion-token')
 
   if (bearerToken !== configuredToken && explicitToken !== configuredToken) {
