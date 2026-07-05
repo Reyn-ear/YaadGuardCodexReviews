@@ -1,6 +1,0 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/maplibre/martin/main/schemas/config.json
-listen_addresses: 127.0.0.1:3001
-pmtiles:
-  sources:
-    gedtm30_jamaica: ${GEDTM30_PMTILES_PATH}
-cors: true

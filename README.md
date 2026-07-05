@@ -108,7 +108,7 @@ npm run terrain:validate-source
 
 The downloader covers `[-90, 9, -58, 33]`, including the Caribbean islands,
 Belize, The Bahamas, Turks and Caicos, and Bermuda. It writes only to
-`sources/copernicus-dem-glo-30`; the existing GEDTM30 files are not used.
+`sources/copernicus-dem-glo-30`.
 
 Generate a Copernicus Terrain-RGB PNG release. Start with the Jamaica smoke
 test, then run the full Caribbean build:
